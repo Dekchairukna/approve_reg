@@ -52,16 +52,27 @@
       '<label class="f">ชื่อที่แสดง<input type="text" id="s_name" placeholder="เช่น ครูสมชาย"></label>' +
       '<label class="f">ชื่อผู้ใช้ (อังกฤษ)<input type="text" id="s_user" autocomplete="username" autocapitalize="off"></label>' +
       '<label class="f">รหัสผ่าน (อย่างน้อย 8 ตัว)<input type="password" id="s_pw" autocomplete="new-password"></label>' +
-      '<button class="btn primary" id="s_go">สร้างบัญชีและเข้าสู่ระบบ</button></section>';
+      '<button class="btn primary" id="s_go">สร้างบัญชีและเข้าสู่ระบบ</button>' +
+      '<div style="border-top:1px solid var(--line);padding-top:12px;display:grid;gap:8px"><b>หรือ ย้ายข้อมูลจากเครื่องอื่น</b>' +
+      '<p class="small muted" style="margin:0">ถ้าเคยใช้ระบบนี้ในเครื่องอื่นแล้ว เลือกไฟล์ <code>instance/checkin.db</code> จากเครื่องนั้น ระบบจะย้ายการแข่งขัน รายชื่อ โลโก้ และบัญชีผู้ใช้เดิมมาทั้งหมด แล้วเข้าสู่ระบบด้วยบัญชีเดิมได้เลย</p>' +
+      '<input type="file" id="s_file" accept=".db,.sqlite,.sqlite3,application/octet-stream"><button class="btn" id="s_restore">กู้คืนจากไฟล์</button></div></section>';
+    document.getElementById('s_restore').onclick = function () {
+      var f = document.getElementById('s_file').files[0]; if (!f) { C.toast('เลือกไฟล์ checkin.db ก่อน'); return; }
+      var fd = new FormData(); fd.append('file', f);
+      this.disabled = true; this.textContent = 'กำลังกู้คืน…';
+      http('POST', '/api/auth/restore', fd).then(function (d) {
+        renderLogin(null, 'กู้คืนแล้ว: ' + d.counts.competitions + ' การแข่งขัน ' + d.counts.entries + ' รายชื่อ ' + d.counts.users + ' บัญชี เข้าสู่ระบบด้วยบัญชีเดิมได้เลย');
+      }).catch(function (e) { renderSetup(errMsg(e)); });
+    };
     document.getElementById('s_go').onclick = function () {
       http('POST', '/api/auth/setup', { name: val('s_name'), username: val('s_user'), password: document.getElementById('s_pw').value })
         .then(boot).catch(function (e) { renderSetup(errMsg(e)); });
     };
   }
-  function renderLogin(msg) {
+  function renderLogin(msg, ok) {
     bare();
     app.innerHTML = '<section class="card center-card" style="display:grid;gap:12px"><h2>เข้าสู่ระบบเจ้าหน้าที่</h2>' +
-      (msg ? '<div class="errors">' + esc(msg) + '</div>' : '') +
+      (msg ? '<div class="errors">' + esc(msg) + '</div>' : '') + (ok ? '<div class="confirmed">' + esc(ok) + '</div>' : '') +
       '<label class="f">ชื่อผู้ใช้<input type="text" id="l_user" autocomplete="username" autocapitalize="off"></label>' +
       '<label class="f">รหัสผ่าน<input type="password" id="l_pw" autocomplete="current-password"></label>' +
       '<button class="btn primary" id="l_go">เข้าสู่ระบบ</button>' +
@@ -110,7 +121,20 @@
           return '<button class="comp" data-id="' + c.id + '">' + C.logoHtml(c, '') + '<div><div class="t">' + esc(c.name) + '</div>' +
             '<div class="s num">' + esc(c.sport ? 'กีฬา' + c.sport + ' · ' : '') + c.schools + ' โรงเรียน · ' + c.entries + ' รายชื่อ · ยืนยันแล้ว ' + c.confirmed + ' รายการ</div></div>' + st + '</button>';
         }).join('') + '</div>' : '<div class="card muted">ยังไม่มีการแข่งขัน' + (isAdmin() ? ' กด "สร้างการแข่งขันใหม่" แล้วอัปโหลดไฟล์ Excel รายชื่อนักกีฬา' : '') + '</div>');
-      if (isAdmin()) document.getElementById('newComp').onclick = function () { go('new'); };
+      if (isAdmin()) {
+        app.insertAdjacentHTML('beforeend', '<section class="card" style="display:grid;gap:10px;margin-top:6px"><h3>สำรอง / กู้คืนข้อมูลทั้งระบบ</h3>' +
+          '<p class="small muted" style="margin:0">ไฟล์สำรองมีทุกการแข่งขัน รายชื่อ การยืนยัน ประวัติ โลโก้ และบัญชีผู้ใช้ ใช้ย้ายเครื่อง/ย้ายเซิร์ฟเวอร์ หรือเก็บไว้กันข้อมูลหาย <b>มีข้อมูลส่วนบุคคล เก็บให้ดี</b></p>' +
+          '<div class="row"><a class="btn" href="/api/admin/backup" style="text-decoration:none">ดาวน์โหลดไฟล์สำรอง</a></div>' +
+          '<form id="rsf" class="row"><input type="file" name="file" accept=".db,.sqlite,.sqlite3" required>' +
+          '<label class="toggle"><input type="checkbox" name="confirm" value="yes"> แทนที่ข้อมูลทั้งหมดในระบบ</label><button class="btn danger" type="submit">กู้คืน</button></form></section>');
+        document.getElementById('newComp').onclick = function () { go('new'); };
+        document.getElementById('rsf').onsubmit = function (ev) {
+          ev.preventDefault();
+          http('POST', '/api/admin/restore', new FormData(ev.target)).then(function (d) {
+            C.toast('กู้คืนแล้ว ' + d.counts.competitions + ' การแข่งขัน'); boot();
+          }).catch(fail);
+        };
+      }
       app.querySelectorAll('.comp').forEach(function (b) { b.onclick = function () { go('comp/' + b.getAttribute('data-id')); }; });
     }).catch(fail);
   }

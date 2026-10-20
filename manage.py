@@ -14,7 +14,8 @@ from werkzeug.security import generate_password_hash
 
 from checkin import create_app
 from checkin.auth import create_user, validate_password, validate_username
-from checkin.db import DB, TABLES, init_db
+from checkin.backup import copy_all
+from checkin.db import DB, init_db
 
 
 def ask_password():
@@ -79,23 +80,17 @@ def copy_to_postgres(a):
         sys.exit(f'ไม่พบไฟล์ {src_path}')
     if not a.url.startswith(('postgres://', 'postgresql://')):
         sys.exit('URL ต้องขึ้นต้นด้วย postgresql://')
+    if '.railway.internal' in a.url:
+        sys.exit('URL นี้เป็นที่อยู่ภายในของ Railway (ใช้ได้เฉพาะบนเซิร์ฟเวอร์ Railway)\n'
+                 'ให้ใช้ค่า DATABASE_PUBLIC_URL แทน (ที่อยู่จะเป็นแบบ ...proxy.rlwy.net:เลขพอร์ต)')
     init_db(src_path, os.path.join(os.path.dirname(src_path), 'uploads'))   # อัปเกรดโครงสร้าง SQLite รุ่นเก่าก่อน
     init_db(a.url)
-    src, dst = DB(src_path), DB(a.url)
-    existing = {t: dst.execute(f'SELECT COUNT(*) FROM {t}').fetchone()[0] for t in TABLES}
-    if any(existing.values()) and not a.replace:
-        sys.exit('PostgreSQL มีข้อมูลอยู่แล้ว: ' + ', '.join(f'{t} {n}' for t, n in existing.items() if n) +
-                 '\nถ้าต้องการเขียนทับทั้งหมด ใส่ --replace')
-    with dst:
-        if a.replace:
-            dst.execute('TRUNCATE ' + ', '.join(TABLES) + ' RESTART IDENTITY CASCADE')
-        for t in TABLES:
-            cols = [c for c in src.columns(t) if c in dst.columns(t)]
-            rows = [tuple(r[c] for c in cols) for r in src.execute(f'SELECT {", ".join(cols)} FROM {t}')]
-            dst.executemany(f'INSERT INTO {t} ({", ".join(cols)}) VALUES ({", ".join("?" * len(cols))})', rows)
-            if 'id' in cols:
-                dst.execute(f"SELECT setval(pg_get_serial_sequence('{t}', 'id'), COALESCE((SELECT MAX(id) FROM {t}), 0) + 1, false)")
-            print(f'  {t:<13} {len(rows):>6} แถว')
+    try:
+        counts = copy_all(DB(src_path), DB(a.url), replace=a.replace)
+    except ValueError as e:
+        sys.exit(f'{e}\nถ้าต้องการเขียนทับทั้งหมด ใส่ --replace')
+    for t, n in counts.items():
+        print(f'  {t:<13} {n:>6} แถว')
     print('คัดลอกเสร็จแล้ว')
 
 

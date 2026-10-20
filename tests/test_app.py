@@ -139,3 +139,21 @@ def test_delete_competition_and_user(client):
     other = next(u for u in users if u['username'] == 'staff1')
     assert client.post(f"/api/admin/users/{me['id']}/delete", headers=H).status_code == 400
     assert client.post(f"/api/admin/users/{other['id']}/delete", headers=H).json['ok']
+
+
+def test_backup_and_restore_on_fresh_install(client, tmp_path):
+    cid = setup_comp(client)
+    submit(client, 'เปตอง : ประถมศึกษา คู่ ชาย')
+    data = client.get('/api/admin/backup').data
+    assert data.startswith(b'SQLite format 3')
+    # ระบบใหม่เปล่า ๆ: กู้คืนจากไฟล์ได้โดยไม่ต้องล็อกอิน
+    from checkin import create_app
+    fresh = create_app(str(tmp_path / 'fresh')).test_client()
+    r = fresh.post('/api/auth/restore', headers=H, content_type='multipart/form-data', data={'file': (io.BytesIO(data), 'checkin.db')})
+    assert r.status_code == 200 and r.json['counts']['entries'] == 7 and r.json['counts']['confs'] == 1
+    assert fresh.post('/api/auth/login', headers=H, json={'username': 'admin', 'password': 'password123'}).status_code == 200
+    assert fresh.get(f'/api/admin/competitions/{cid}/overview').json['totals']['pairsDone'] == 1
+    # มีผู้ใช้แล้ว ห้ามกู้คืนแบบไม่ล็อกอิน
+    fresh.post('/api/auth/logout', headers=H)
+    r = fresh.post('/api/auth/restore', headers=H, content_type='multipart/form-data', data={'file': (io.BytesIO(data), 'checkin.db')})
+    assert r.status_code == 403

@@ -219,6 +219,31 @@ def logs(cid):
     return jsonify(logs=[dict(r, by=r['by_name'], user=r['staff_user']) for r in rows])
 
 
+@bp.get('/api/admin/backup')
+@login_required('admin')
+def backup():
+    from .backup import backup_to_sqlite_bytes
+    data = backup_to_sqlite_bytes(current_app.config['DATABASE'])
+    return send_file(io.BytesIO(data), as_attachment=True, download_name=f'checkin_backup_{logic.now_bkk():%Y%m%d_%H%M}.db',
+                     mimetype='application/octet-stream')
+
+
+@bp.post('/api/admin/restore')
+@login_required('admin')
+def restore():
+    from .backup import restore_from_sqlite_bytes
+    if request.form.get('confirm') != 'yes':
+        return err('ติ๊กยืนยันก่อน การกู้คืนจะแทนที่ข้อมูลทั้งหมดในระบบ')
+    f = request.files.get('file')
+    if not f:
+        return err('กรุณาเลือกไฟล์สำรอง (.db)')
+    try:
+        counts = restore_from_sqlite_bytes(f.read(), current_app.config['DATABASE'])
+    except ValueError as e:
+        return err(str(e))
+    return jsonify(ok=True, counts=counts)
+
+
 @bp.get('/api/admin/competitions/<int:cid>/export')
 @login_required()
 def export_excel(cid):

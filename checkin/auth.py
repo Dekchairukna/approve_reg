@@ -100,6 +100,24 @@ def setup():
     return jsonify(ok=True)
 
 
+@bp.post('/api/auth/restore')
+def restore_on_setup():
+    """ตอนติดตั้งใหม่ (ยังไม่มีผู้ใช้): กู้คืนทั้งระบบจากไฟล์ checkin.db ที่ใช้อยู่ในเครื่องอื่น"""
+    from flask import current_app
+    from .backup import restore_from_sqlite_bytes
+    if user_count() > 0:
+        return err('ระบบมีผู้ใช้แล้ว ให้ผู้ดูแลระบบกู้คืนจากหน้าการแข่งขัน', 403)
+    f = request.files.get('file')
+    if not f:
+        return err('กรุณาเลือกไฟล์ checkin.db')
+    try:
+        counts = restore_from_sqlite_bytes(f.read(), current_app.config['DATABASE'])
+    except ValueError as e:
+        return err(str(e))
+    session.clear()
+    return jsonify(ok=True, counts=counts)
+
+
 @bp.post('/api/auth/login')
 def login():
     ip = request.headers.get('X-Forwarded-For', request.remote_addr or '').split(',')[0].strip()
