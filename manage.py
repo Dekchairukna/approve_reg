@@ -3,16 +3,18 @@
   python3 manage.py create-user <username> --role admin|staff [--name "ชื่อ"]
   python3 manage.py reset-password <username>
   python3 manage.py list-users
+  python3 manage.py copy-to-postgres "postgresql://..."   ย้ายข้อมูลจาก SQLite ในเครื่องขึ้น PostgreSQL
 """
 import argparse
 import getpass
+import os
 import sys
 
 from werkzeug.security import generate_password_hash
 
 from checkin import create_app
 from checkin.auth import create_user, validate_password, validate_username
-from checkin.db import connect
+from checkin.db import DB, TABLES, init_db
 
 
 def ask_password():
@@ -38,10 +40,16 @@ def main():
     r = sub.add_parser('reset-password', help='ตั้งรหัสผ่านใหม่')
     r.add_argument('username')
     sub.add_parser('list-users', help='แสดงบัญชีทั้งหมด')
+    cp = sub.add_parser('copy-to-postgres', help='คัดลอกข้อมูลทั้งหมดจาก SQLite ในเครื่องขึ้น PostgreSQL')
+    cp.add_argument('url', help='postgresql://... (บน Railway ใช้ค่า DATABASE_PUBLIC_URL)')
+    cp.add_argument('--sqlite', default='', help='ไฟล์ SQLite ต้นทาง (ค่าเริ่มต้น instance/checkin.db)')
+    cp.add_argument('--replace', action='store_true', help='ลบข้อมูลเดิมใน PostgreSQL ก่อนคัดลอก')
     a = ap.parse_args()
 
+    if a.cmd == 'copy-to-postgres':
+        return copy_to_postgres(a)
     app = create_app()
-    conn = connect(app.config['DATABASE'])
+    conn = DB(app.config['DATABASE'])
     if a.cmd == 'create-user':
         e = validate_username(a.username)
         if e:
@@ -61,6 +69,34 @@ def main():
     elif a.cmd == 'list-users':
         for u in conn.execute('SELECT username, name, role, active, last_login FROM users ORDER BY id'):
             print(f"{u['username']:<20} {u['role']:<6} {'ใช้งาน' if u['active'] else 'ปิด':<6} {u['name']}  เข้าล่าสุด {u['last_login'] or '-'}")
+
+
+
+def copy_to_postgres(a):
+    base = os.path.dirname(os.path.abspath(__file__))
+    src_path = a.sqlite or os.path.join(os.environ.get('CHECKIN_DATA', os.path.join(base, 'instance')), 'checkin.db')
+    if not os.path.exists(src_path):
+        sys.exit(f'ไม่พบไฟล์ {src_path}')
+    if not a.url.startswith(('postgres://', 'postgresql://')):
+        sys.exit('URL ต้องขึ้นต้นด้วย postgresql://')
+    init_db(src_path, os.path.join(os.path.dirname(src_path), 'uploads'))   # อัปเกรดโครงสร้าง SQLite รุ่นเก่าก่อน
+    init_db(a.url)
+    src, dst = DB(src_path), DB(a.url)
+    existing = {t: dst.execute(f'SELECT COUNT(*) FROM {t}').fetchone()[0] for t in TABLES}
+    if any(existing.values()) and not a.replace:
+        sys.exit('PostgreSQL มีข้อมูลอยู่แล้ว: ' + ', '.join(f'{t} {n}' for t, n in existing.items() if n) +
+                 '\nถ้าต้องการเขียนทับทั้งหมด ใส่ --replace')
+    with dst:
+        if a.replace:
+            dst.execute('TRUNCATE ' + ', '.join(TABLES) + ' RESTART IDENTITY CASCADE')
+        for t in TABLES:
+            cols = [c for c in src.columns(t) if c in dst.columns(t)]
+            rows = [tuple(r[c] for c in cols) for r in src.execute(f'SELECT {", ".join(cols)} FROM {t}')]
+            dst.executemany(f'INSERT INTO {t} ({", ".join(cols)}) VALUES ({", ".join("?" * len(cols))})', rows)
+            if 'id' in cols:
+                dst.execute(f"SELECT setval(pg_get_serial_sequence('{t}', 'id'), COALESCE((SELECT MAX(id) FROM {t}), 0) + 1, false)")
+            print(f'  {t:<13} {len(rows):>6} แถว')
+    print('คัดลอกเสร็จแล้ว')
 
 
 if __name__ == '__main__':

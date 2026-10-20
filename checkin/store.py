@@ -2,15 +2,18 @@
 from .db import get_db
 
 
+COMP_COLS = 'id, slug, name, sport, subtitle, logo, logo_mime, max_events, active, created_at'
+
+
 def comp_by_slug(slug, include_inactive=False):
-    r = get_db().execute('SELECT * FROM competitions WHERE slug=?', (slug,)).fetchone()
+    r = get_db().execute(f'SELECT {COMP_COLS} FROM competitions WHERE slug=?', (slug,)).fetchone()
     if r and (r['active'] or include_inactive):
         return dict(r)
     return None
 
 
 def comp_by_id(cid):
-    r = get_db().execute('SELECT * FROM competitions WHERE id=?', (cid,)).fetchone()
+    r = get_db().execute(f'SELECT {COMP_COLS} FROM competitions WHERE id=?', (cid,)).fetchone()
     return dict(r) if r else None
 
 
@@ -33,13 +36,13 @@ def load_entries(cid, school=None):
         q += ' AND school=?'
         args.append(school)
     return [dict(id=r['id'], event=r['event'], school=r['school'], level=r['level'], team=r['team'],
-                 prefix=r['prefix'], first=r['first'], last=r['last'], status=r['status'], by=r['by'],
+                 prefix=r['prefix'], first=r['first'], last=r['last'], status=r['status'], by=r['by_name'],
                  phone=r['phone'], at=r['at'], oPrefix=r['o_prefix'], oFirst=r['o_first'], oLast=r['o_last'])
             for r in get_db().execute(q + ' ORDER BY id', args)]
 
 
 def load_confs(cid):
-    return [dict(school=r['school'], event=r['event'], by=r['by'], phone=r['phone'], at=r['at'], count=r['count'])
+    return [dict(school=r['school'], event=r['event'], by=r['by_name'], phone=r['phone'], at=r['at'], count=r['count'])
             for r in get_db().execute('SELECT * FROM confs WHERE comp_id=?', (cid,))]
 
 

@@ -1,4 +1,4 @@
-"""ระบบยืนยันรายชื่อและรายงานตัวนักกีฬา (Flask + SQLite)"""
+"""ระบบยืนยันรายชื่อและรายงานตัวนักกีฬา (Flask + PostgreSQL/SQLite)"""
 import os
 import secrets
 from datetime import timedelta
@@ -6,7 +6,7 @@ from datetime import timedelta
 from flask import Flask, jsonify, request
 
 from . import admin, auth, public
-from .db import close_db, init_db
+from .db import close_db, database_target, init_db
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -27,7 +27,7 @@ def create_app(instance_dir=None):
     os.makedirs(os.path.join(instance_dir, 'uploads'), exist_ok=True)
     app = Flask(__name__, static_folder=os.path.join(BASE, 'static'), static_url_path='/static')
     app.config.update(
-        DATABASE=os.path.join(instance_dir, 'checkin.db'),
+        DATABASE=database_target(instance_dir),
         UPLOAD_DIR=os.path.join(instance_dir, 'uploads'),
         SECRET_KEY=_secret_key(instance_dir),
         SESSION_COOKIE_HTTPONLY=True,
@@ -38,7 +38,7 @@ def create_app(instance_dir=None):
         JSON_AS_ASCII=False,
     )
     app.json.ensure_ascii = False
-    init_db(app.config['DATABASE'])
+    init_db(app.config['DATABASE'], app.config['UPLOAD_DIR'])
 
     @app.before_request
     def before():

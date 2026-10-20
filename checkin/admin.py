@@ -41,17 +41,15 @@ def _comp_summary(c):
     return d
 
 
-def _save_logo(file, cid):
+def _read_logo(file):
+    """ตรวจไฟล์โลโก้ คืน (ชนิดไฟล์, ข้อมูล) — เก็บในฐานข้อมูล เพื่อไม่หายเมื่อ deploy ใหม่"""
     ext = os.path.splitext(file.filename or '')[1].lower()
     if ext not in LOGO_TYPES:
         raise ValueError('โลโก้ต้องเป็นไฟล์ png, jpg, webp หรือ gif')
     data = file.read()
     if len(data) > 3 * 1024 * 1024:
         raise ValueError('ไฟล์โลโก้ใหญ่เกิน 3 MB')
-    name = f'logo_{cid}_{uuid.uuid4().hex[:8]}{ext}'
-    with open(os.path.join(current_app.config['UPLOAD_DIR'], name), 'wb') as f:
-        f.write(data)
-    return name
+    return 'image/' + ('jpeg' if LOGO_TYPES[ext] == 'jpg' else LOGO_TYPES[ext]), data
 
 
 def _valid_slug(s):
@@ -62,7 +60,7 @@ def _valid_slug(s):
 @bp.get('/api/admin/competitions')
 @login_required()
 def list_comps():
-    rows = get_db().execute('SELECT * FROM competitions ORDER BY active DESC, id DESC')
+    rows = get_db().execute(f'SELECT {store.COMP_COLS} FROM competitions ORDER BY active DESC, id DESC')
     return jsonify(competitions=[_comp_summary(dict(r)) for r in rows], me=g.user)
 
 
@@ -86,21 +84,18 @@ def create_comp():
         return err('รหัสลิงก์นี้ถูกใช้แล้ว')
     try:
         rows = read_excel(request.files['file'])
-    except ImportError_ as e:
+        logo = _read_logo(request.files['logo']) if request.files.get('logo') and request.files['logo'].filename else None
+    except (ImportError_, ValueError) as e:
         return err(str(e))
     with conn:
-        cur = conn.execute('INSERT INTO competitions (slug, name, sport, subtitle, max_events, created_at) '
-                           'VALUES (?,?,?,?,?,?)',
-                           (slug, name, (f.get('sport') or '').strip(), (f.get('subtitle') or '').strip(),
-                            max_events, logic.stamp()))
-        cid = cur.lastrowid
+        cid = conn.insert_id('INSERT INTO competitions (slug, name, sport, subtitle, max_events, created_at) '
+                             'VALUES (?,?,?,?,?,?)',
+                             (slug, name, (f.get('sport') or '').strip(), (f.get('subtitle') or '').strip(),
+                              max_events, logic.stamp()))
         result = import_rows(conn, cid, rows)
-        if request.files.get('logo') and request.files['logo'].filename:
-            try:
-                conn.execute('UPDATE competitions SET logo=? WHERE id=?', (_save_logo(request.files['logo'], cid), cid))
-            except ValueError as e:
-                conn.rollback()
-                return err(str(e))
+        if logo:
+            conn.execute('UPDATE competitions SET logo=?, logo_mime=?, logo_data=? WHERE id=?',
+                         (uuid.uuid4().hex[:8], logo[0], logo[1], cid))
     return jsonify(ok=True, id=cid, imported=result)
 
 
@@ -127,16 +122,19 @@ def update_comp(cid):
     except ValueError:
         return err('จำนวนรายการสูงสุดต่อคนต้องเป็นตัวเลข')
     active = str(f.get('active', c['active'])).lower() in ('1', 'true', 'on')
-    logo = c['logo']
+    logo = None
     if request.files.get('logo') and request.files['logo'].filename:
         try:
-            logo = _save_logo(request.files['logo'], cid)
+            logo = _read_logo(request.files['logo'])
         except ValueError as e:
             return err(str(e))
     with conn:
-        conn.execute('UPDATE competitions SET slug=?, name=?, sport=?, subtitle=?, max_events=?, active=?, logo=? WHERE id=?',
+        conn.execute('UPDATE competitions SET slug=?, name=?, sport=?, subtitle=?, max_events=?, active=? WHERE id=?',
                      (slug, (f.get('name') or c['name']).strip(), (f.get('sport', c['sport']) or '').strip(),
-                      (f.get('subtitle', c['subtitle']) or '').strip(), max_events, int(active), logo, cid))
+                      (f.get('subtitle', c['subtitle']) or '').strip(), max_events, int(active), cid))
+        if logo:
+            conn.execute('UPDATE competitions SET logo=?, logo_mime=?, logo_data=? WHERE id=?',
+                         (uuid.uuid4().hex[:8], logo[0], logo[1], cid))
     return jsonify(ok=True)
 
 
@@ -151,11 +149,6 @@ def delete_comp(cid):
         for t in ('logs', 'confs', 'entries', 'events'):
             conn.execute(f'DELETE FROM {t} WHERE comp_id=?', (cid,))
         conn.execute('DELETE FROM competitions WHERE id=?', (cid,))
-    if c['logo']:
-        try:
-            os.remove(os.path.join(current_app.config['UPLOAD_DIR'], c['logo']))
-        except OSError:
-            pass
     return jsonify(ok=True)
 
 
@@ -175,7 +168,7 @@ def reimport(cid):
         return err(str(e))
     with conn:
         result = import_rows(conn, cid, rows)
-        conn.execute('INSERT INTO logs (comp_id, at, action, after, user) VALUES (?,?,?,?,?)',
+        conn.execute('INSERT INTO logs (comp_id, at, action, after, staff_user) VALUES (?,?,?,?,?)',
                      (cid, logic.stamp(), 'นำเข้ารายชื่อใหม่', f"{result['entries']} รายชื่อ", g.user['username']))
     return jsonify(ok=True, imported=result)
 
@@ -223,7 +216,7 @@ def print_data(cid):
 def logs(cid):
     _comp_or_404(cid)
     rows = get_db().execute('SELECT * FROM logs WHERE comp_id=? ORDER BY id DESC LIMIT 300', (cid,))
-    return jsonify(logs=[dict(r) for r in rows])
+    return jsonify(logs=[dict(r, by=r['by_name'], user=r['staff_user']) for r in rows])
 
 
 @bp.get('/api/admin/competitions/<int:cid>/export')
@@ -248,9 +241,9 @@ def export_excel(cid):
         ws2.append([x['school'], x['event'], x['by'], x['phone'], x['at'], x['count']])
     ws3 = wb.create_sheet('ประวัติการแก้ไข')
     ws3.append(['เวลา', 'โรงเรียน', 'รายการแข่งขัน', 'การกระทำ', 'ก่อน', 'หลัง', 'ผู้แก้ไข', 'เบอร์โทร', 'บัญชีเจ้าหน้าที่'])
-    for r in get_db().execute('SELECT at, school, event, action, before, after, by, phone, user FROM logs '
+    for r in get_db().execute('SELECT at, school, event, action, before, after, by_name, phone, staff_user FROM logs '
                               'WHERE comp_id=? ORDER BY id', (cid,)):
-        ws3.append(list(r))
+        ws3.append(list(r.values()))
     for sh in wb.worksheets:
         sh.freeze_panes = 'A2'
         for col in sh.columns:

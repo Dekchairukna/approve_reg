@@ -1,5 +1,7 @@
 # ระบบยืนยันรายชื่อและรายงานตัวนักกีฬา
 
+Flask + PostgreSQL หรือ SQLite
+
 เว็บให้โรงเรียนยืนยันหรือแก้ไขรายชื่อนักกีฬาก่อนวันแข่ง **โดยไม่ต้องล็อกอิน** และให้เจ้าหน้าที่ดูสถานะ พิมพ์ใบรายงานตัว และส่งออก Excel ผ่านหลังบ้านที่มีบัญชีผู้ใช้ ระบบเดียวรองรับหลายการแข่งขัน
 
 ใช้ครั้งแรกกับ **กีฬาเปตอง การแข่งขันกีฬาสาธิตสามัคคี ครั้งที่ 49 “คำมอกหลวงเกมส์”**
@@ -34,6 +36,34 @@ python3 app.py
 
 - เปลี่ยนพอร์ต: `PORT=8080 python3 app.py`
 - ย้ายที่เก็บข้อมูล: `CHECKIN_DATA=/path/to/data python3 app.py` (ค่าเริ่มต้นคือโฟลเดอร์ `instance/`)
+
+## ฐานข้อมูล: SQLite หรือ PostgreSQL
+
+- ไม่ได้ตั้งค่าอะไร → ใช้ SQLite ที่ `instance/checkin.db` (เหมาะกับรันในเครื่อง/วงแลน)
+- ตั้งตัวแปร `DATABASE_URL=postgresql://...` → ใช้ PostgreSQL (เหมาะกับ deploy บนคลาวด์ เพราะดิสก์ของเซิร์ฟเวอร์คลาวด์มักถูกล้างทุกครั้งที่ deploy)
+- โลโก้เก็บในฐานข้อมูล ไม่หายเมื่อ deploy ใหม่
+
+### Deploy บน Railway
+
+1. สร้างโปรเจกต์ → **Deploy from GitHub repo** เลือก repo นี้ (มี `Procfile` แล้ว)
+2. กด **+ New → Database → PostgreSQL**
+3. ที่ service ของเว็บ → **Variables** เพิ่ม
+   - `DATABASE_URL` = `${{Postgres.DATABASE_URL}}`
+   - `SECRET_KEY` = ข้อความสุ่มยาว ๆ (เช่นจาก `python3 -c "import secrets;print(secrets.token_hex(32))"`) ไม่ตั้งแล้วทุกคนจะหลุดออกจากระบบทุกครั้งที่ deploy
+   - `COOKIE_SECURE` = `1`
+4. **Settings → Networking → Generate Domain** จะได้ลิงก์ https
+
+### ย้ายข้อมูลจาก SQLite ในเครื่องขึ้น PostgreSQL
+
+ที่ service PostgreSQL → **Variables** คัดลอกค่า `DATABASE_PUBLIC_URL` แล้วรันในเครื่อง:
+
+```bash
+python3 manage.py copy-to-postgres "postgresql://...ค่า DATABASE_PUBLIC_URL..."
+```
+
+คัดลอกทุกอย่าง: บัญชีผู้ใช้ การแข่งขัน โลโก้ รายชื่อ การยืนยัน ประวัติ ถ้าบน PostgreSQL มีข้อมูลอยู่แล้ว (เช่นเคยเปิดเว็บและสร้างบัญชีแรกไว้) ระบบจะไม่ทับให้ ต้องใส่ `--replace` ซึ่งจะ**ลบข้อมูลบน PostgreSQL ทั้งหมด**แล้วแทนด้วยข้อมูลในเครื่อง
+
+ทดสอบกับ PostgreSQL: `TEST_DATABASE_URL=postgresql://.../ฐานทดสอบ python3 -m pytest -q` (ฐานนั้นจะถูกล้าง)
 
 ## รูปแบบไฟล์ Excel
 
@@ -77,7 +107,8 @@ checkin/
 static/             หน้าเว็บ (HTML/CSS/JS ไม่ต้อง build)
 tests/              python3 -m pytest -q (GitHub Actions รันให้อัตโนมัติทุกครั้งที่ push)
 examples/           ไฟล์ Excel ตัวอย่าง (ข้อมูลสมมติ)
-instance/           ข้อมูลจริง: ฐานข้อมูล โลโก้ กุญแจ session (ไม่ขึ้น git)
+instance/           ข้อมูลจริงตอนใช้ SQLite: ฐานข้อมูล กุญแจ session (ไม่ขึ้น git)
+Procfile            คำสั่งเปิดเว็บสำหรับ Railway/Heroku
 ```
 
 ## ความปลอดภัยและข้อมูลส่วนบุคคล

@@ -1,7 +1,7 @@
 """หน้าสาธารณะ: โรงเรียนยืนยันรายชื่อโดยไม่ต้องล็อกอิน"""
 import threading
 
-from flask import Blueprint, abort, current_app, g, jsonify, request, send_from_directory
+from flask import Blueprint, Response, abort, current_app, g, jsonify, request, send_from_directory
 
 from . import logic, store
 from .db import get_db
@@ -28,15 +28,17 @@ def comp_page(slug):
 
 @bp.get('/logo/<int:cid>')
 def logo(cid):
-    c = store.comp_by_id(cid)
-    if not c or not c['logo']:
+    r = get_db().execute('SELECT logo_mime, logo_data FROM competitions WHERE id=?', (cid,)).fetchone()
+    if not r or not r['logo_data']:
         abort(404)
-    return send_from_directory(current_app.config['UPLOAD_DIR'], c['logo'], max_age=86400)
+    resp = Response(bytes(r['logo_data']), mimetype=r['logo_mime'] or 'image/png')
+    resp.headers['Cache-Control'] = 'public, max-age=86400'
+    return resp
 
 
 @bp.get('/api/competitions')
 def competitions():
-    rows = get_db().execute('SELECT * FROM competitions WHERE active=1 ORDER BY id DESC')
+    rows = get_db().execute(f'SELECT {store.COMP_COLS} FROM competitions WHERE active=1 ORDER BY id DESC')
     return jsonify(competitions=[store.comp_public(dict(r)) for r in rows])
 
 
@@ -76,15 +78,16 @@ def submit(slug):
             return jsonify(res)
         with conn:
             for eid, nu in res['changes']:
-                conn.execute('UPDATE entries SET prefix=?, first=?, last=?, status=?, by=?, phone=?, at=? '
+                conn.execute('UPDATE entries SET prefix=?, first=?, last=?, status=?, by_name=?, phone=?, at=? '
                              'WHERE id=? AND comp_id=?',
                              (nu['prefix'], nu['first'], nu['last'], nu['status'], nu['by'], nu['phone'], nu['at'],
                               eid, c['id']))
             cf = res['conf']
-            conn.execute('INSERT OR REPLACE INTO confs (comp_id, school, event, by, phone, at, count) '
-                         'VALUES (?,?,?,?,?,?,?)',
+            conn.execute('INSERT INTO confs (comp_id, school, event, by_name, phone, at, count) VALUES (?,?,?,?,?,?,?) '
+                         'ON CONFLICT (comp_id, school, event) DO UPDATE SET by_name=excluded.by_name, '
+                         'phone=excluded.phone, at=excluded.at, count=excluded.count',
                          (c['id'], cf['school'], cf['event'], cf['by'], cf['phone'], cf['at'], cf['count']))
-            conn.executemany('INSERT INTO logs (comp_id, at, school, event, entry_id, action, before, after, by, phone, user) '
+            conn.executemany('INSERT INTO logs (comp_id, at, school, event, entry_id, action, before, after, by_name, phone, staff_user) '
                              'VALUES (?,?,?,?,?,?,?,?,?,?,?)',
                              [(c['id'], l['at'], l['school'], l['event'], l['entry_id'], l['action'], l['before'],
                                l['after'], l['by'], l['phone'], l['user']) for l in res['logs']])

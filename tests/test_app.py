@@ -1,5 +1,10 @@
-"""ทดสอบระบบด้วยข้อมูลสมมติ:  python3 -m pytest -q"""
+"""ทดสอบระบบด้วยข้อมูลสมมติ:  python3 -m pytest -q
+
+ทดสอบกับ PostgreSQL ด้วย:  TEST_DATABASE_URL=postgresql://... python3 -m pytest -q
+(ฐานข้อมูลนั้นจะถูกล้างทุกครั้ง ห้ามใช้ฐานข้อมูลจริง)
+"""
 import io
+import os
 
 import pytest
 from openpyxl import Workbook
@@ -32,7 +37,17 @@ def xlsx():
 
 
 @pytest.fixture
-def client(tmp_path):
+def client(tmp_path, monkeypatch):
+    pg = os.environ.get('TEST_DATABASE_URL')
+    if pg:
+        from checkin.db import DB, TABLES, init_db
+        monkeypatch.setenv('DATABASE_URL', pg)
+        init_db(pg)
+        db = DB(pg)
+        db.execute('TRUNCATE ' + ', '.join(TABLES) + ' RESTART IDENTITY CASCADE')
+        db.close()
+    else:
+        monkeypatch.delenv('DATABASE_URL', raising=False)
     app = create_app(str(tmp_path))
     app.config['TESTING'] = True
     return app.test_client()
