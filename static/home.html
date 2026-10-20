@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ระบบรายงานตัวนักกีฬา</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Kanit:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&family=Sarabun:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="band"><div class="wrap"><div class="band-top">
+  <div><div class="games">ระบบยืนยันรายชื่อและรายงานตัวนักกีฬา</div><h1>เลือกการแข่งขัน</h1></div>
+  <div class="staffbar"><a href="/admin">เข้าสู่ระบบเจ้าหน้าที่</a></div>
+</div></div></header>
+<main><div class="wrap"><div class="comp-list" id="list"><div class="loading">กำลังโหลด…</div></div></div></main>
+<script src="/static/common.js"></script>
+<script>
+C.http('GET', '/api/competitions').then(function (d) {
+  var el = document.getElementById('list');
+  if (!d.competitions.length) { el.innerHTML = '<div class="card muted">ยังไม่มีการแข่งขันที่เปิดรับยืนยัน</div>'; return; }
+  el.innerHTML = d.competitions.map(function (c) {
+    return '<a class="comp" style="text-decoration:none;color:inherit" href="/c/' + encodeURIComponent(c.slug) + '">' + C.logoHtml(c, '') +
+      '<div><div class="t">' + C.esc(c.name) + '</div><div class="s">' + C.esc([c.sport ? 'กีฬา' + c.sport : '', c.subtitle].filter(Boolean).join(' · ')) + '</div></div>' +
+      '<span class="pill wait">ยืนยันรายชื่อ ›</span></a>';
+  }).join('');
+}).catch(function (e) { document.getElementById('list').innerHTML = '<div class="errors">' + C.esc(e.message) + '</div>'; });
+</script>
+</body>
+</html>

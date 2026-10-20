@@ -1,0 +1,26 @@
+# ข้อมูลจริง: ฐานข้อมูล ไฟล์อัปโหลด กุญแจ session — ห้ามขึ้น GitHub
+instance/
+*.db
+*.db-wal
+*.db-shm
+# รายชื่อนักกีฬา (ข้อมูลส่วนบุคคลของนักเรียน)
+*.xlsx
+*.xls
+!examples/sample_athletes.xlsx
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# macOS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# ไฟล์จากเวอร์ชันแรก (ไม่ใช้แล้ว)
+static/logo.jpg
+_old_version/
+*.zip

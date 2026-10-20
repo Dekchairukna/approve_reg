@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>หลังบ้านเจ้าหน้าที่</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Kanit:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&family=Sarabun:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="band">
+  <div class="wrap">
+    <div class="band-top">
+      <div><div class="games">ระบบยืนยันรายชื่อนักกีฬา</div><h1>หลังบ้านเจ้าหน้าที่</h1></div>
+      <div class="staffbar" id="who"></div>
+    </div>
+    <nav class="nav" id="nav"></nav>
+  </div>
+</header>
+<main><div class="wrap" id="app"><div class="loading">กำลังโหลด…</div></div></main>
+<div id="printArea"></div>
+<div class="toast" id="toast" hidden></div>
+
+<script src="/static/common.js"></script>
+<script>
+(function () {
+  var esc = C.esc, thDate = C.thDate, thDateTime = C.thDateTime, http = C.http;
+  var A = { me: null, comp: null, events: [], schools: [], printHtml: '' };
+  var app = document.getElementById('app');
+  function errMsg(e) { return (e && (e.message || e)) + ''; }
+  function isAdmin() { return A.me && A.me.role === 'admin'; }
+  function fail(e) { if (e && e.status === 401) { A.me = null; boot(); return; } C.toast(errMsg(e)); }
+  function go(h) { if (location.hash === '#' + h) route(); else location.hash = h; }
+  window.addEventListener('hashchange', route);
+
+  /* ---------- เข้าสู่ระบบ ---------- */
+  function boot() {
+    http('GET', '/api/auth/me').then(function (d) {
+      A.me = d.user;
+      if (d.needsSetup) return renderSetup();
+      if (!A.me) return renderLogin();
+      renderShell(); route();
+    }).catch(function (e) { app.innerHTML = '<div class="errors">' + esc(errMsg(e)) + '</div>'; });
+  }
+  function bare() { document.getElementById('nav').innerHTML = ''; document.getElementById('who').innerHTML = '<a href="/">หน้ารายการแข่งขัน</a>'; }
+  function renderSetup(msg) {
+    bare();
+    app.innerHTML = '<section class="card center-card" style="display:grid;gap:12px"><h2>ตั้งค่าครั้งแรก</h2>' +
+      '<p class="small muted" style="margin:0">สร้างบัญชีผู้ดูแลระบบ (admin) คนแรก ใช้จัดการการแข่งขันและบัญชีเจ้าหน้าที่คนอื่น</p>' +
+      (msg ? '<div class="errors">' + esc(msg) + '</div>' : '') +
+      '<label class="f">ชื่อที่แสดง<input type="text" id="s_name" placeholder="เช่น ครูสมชาย"></label>' +
+      '<label class="f">ชื่อผู้ใช้ (อังกฤษ)<input type="text" id="s_user" autocomplete="username" autocapitalize="off"></label>' +
+      '<label class="f">รหัสผ่าน (อย่างน้อย 8 ตัว)<input type="password" id="s_pw" autocomplete="new-password"></label>' +
+      '<button class="btn primary" id="s_go">สร้างบัญชีและเข้าสู่ระบบ</button></section>';
+    document.getElementById('s_go').onclick = function () {
+      http('POST', '/api/auth/setup', { name: val('s_name'), username: val('s_user'), password: document.getElementById('s_pw').value })
+        .then(boot).catch(function (e) { renderSetup(errMsg(e)); });
+    };
+  }
+  function renderLogin(msg) {
+    bare();
+    app.innerHTML = '<section class="card center-card" style="display:grid;gap:12px"><h2>เข้าสู่ระบบเจ้าหน้าที่</h2>' +
+      (msg ? '<div class="errors">' + esc(msg) + '</div>' : '') +
+      '<label class="f">ชื่อผู้ใช้<input type="text" id="l_user" autocomplete="username" autocapitalize="off"></label>' +
+      '<label class="f">รหัสผ่าน<input type="password" id="l_pw" autocomplete="current-password"></label>' +
+      '<button class="btn primary" id="l_go">เข้าสู่ระบบ</button>' +
+      '<p class="hint" style="margin:0">ลืมรหัสผ่าน: ให้ผู้ดูแลระบบตั้งให้ใหม่ หรือใช้คำสั่ง python3 manage.py reset-password ชื่อผู้ใช้</p></section>';
+    var goLogin = function () {
+      http('POST', '/api/auth/login', { username: val('l_user'), password: document.getElementById('l_pw').value })
+        .then(boot).catch(function (e) { renderLogin(errMsg(e)); });
+    };
+    document.getElementById('l_go').onclick = goLogin;
+    document.getElementById('l_pw').addEventListener('keydown', function (e) { if (e.key === 'Enter') goLogin(); });
+  }
+  function val(id) { var el = document.getElementById(id); return el ? el.value.trim() : ''; }
+
+  function renderShell() {
+    document.getElementById('who').innerHTML = '<span><b>' + esc(A.me.name || A.me.username) + '</b> · ' + (isAdmin() ? 'ผู้ดูแลระบบ' : 'เจ้าหน้าที่') + '</span>' +
+      '<button id="w_pw">เปลี่ยนรหัสผ่าน</button><button id="w_out">ออกจากระบบ</button>';
+    document.getElementById('w_pw').onclick = function () { go('password'); };
+    document.getElementById('w_out').onclick = function () { http('POST', '/api/auth/logout').then(function () { location.hash = ''; boot(); }); };
+  }
+  function setNav(cur) {
+    var items = [['comps', 'การแข่งขัน']].concat(isAdmin() ? [['users', 'บัญชีเจ้าหน้าที่']] : []);
+    document.getElementById('nav').innerHTML = items.map(function (i) {
+      return '<button data-go="' + i[0] + '"' + (cur === i[0] ? ' aria-current="page"' : '') + '>' + i[1] + '</button>';
+    }).join('');
+    document.querySelectorAll('#nav button').forEach(function (b) { b.onclick = function () { go(b.getAttribute('data-go')); }; });
+  }
+
+  function route() {
+    if (!A.me) return;
+    hidePrint();
+    var p = location.hash.replace(/^#/, '').split('/');
+    if (p[0] === 'users' && isAdmin()) { setNav('users'); return renderUsers(); }
+    if (p[0] === 'password') { setNav(''); return renderPassword(); }
+    if (p[0] === 'new' && isAdmin()) { setNav('comps'); return renderNewComp(); }
+    if (p[0] === 'comp' && p[1]) { setNav('comps'); return openComp(+p[1], p[2] || 'overview'); }
+    setNav('comps'); renderComps();
+  }
+
+  /* ---------- รายการการแข่งขัน ---------- */
+  function renderComps() {
+    app.innerHTML = '<div class="loading">กำลังโหลด…</div>';
+    http('GET', '/api/admin/competitions').then(function (d) {
+      app.innerHTML = '<div class="row between"><h2>การแข่งขัน</h2>' + (isAdmin() ? '<button class="btn primary" id="newComp">+ สร้างการแข่งขันใหม่</button>' : '') + '</div>' +
+        (d.competitions.length ? '<div class="comp-list">' + d.competitions.map(function (c) {
+          var st = !c.active ? '<span class="pill off">ปิดใช้งาน</span>' : c.undated ? '<span class="pill wait">ยังไม่ตั้งวันแข่ง ' + c.undated + ' รายการ</span>' : '<span class="pill ok">เปิดใช้งาน</span>';
+          return '<button class="comp" data-id="' + c.id + '">' + C.logoHtml(c, '') + '<div><div class="t">' + esc(c.name) + '</div>' +
+            '<div class="s num">' + esc(c.sport ? 'กีฬา' + c.sport + ' · ' : '') + c.schools + ' โรงเรียน · ' + c.entries + ' รายชื่อ · ยืนยันแล้ว ' + c.confirmed + ' รายการ</div></div>' + st + '</button>';
+        }).join('') + '</div>' : '<div class="card muted">ยังไม่มีการแข่งขัน' + (isAdmin() ? ' กด "สร้างการแข่งขันใหม่" แล้วอัปโหลดไฟล์ Excel รายชื่อนักกีฬา' : '') + '</div>');
+      if (isAdmin()) document.getElementById('newComp').onclick = function () { go('new'); };
+      app.querySelectorAll('.comp').forEach(function (b) { b.onclick = function () { go('comp/' + b.getAttribute('data-id')); }; });
+    }).catch(fail);
+  }
+
+  function renderNewComp(msg) {
+    app.innerHTML = '<section class="card" style="display:grid;gap:14px"><button class="btn link" id="back" style="justify-self:start">‹ กลับ</button>' +
+      '<h2>สร้างการแข่งขันใหม่</h2>' + (msg ? '<div class="errors">' + esc(msg) + '</div>' : '') +
+      '<form id="f" class="grid-form">' +
+      '<label class="f wide">ชื่อการแข่งขัน<input type="text" name="name" required placeholder="เช่น การแข่งขันกีฬาสาธิตสามัคคี ครั้งที่ 49 “คำมอกหลวงเกมส์”"></label>' +
+      '<label class="f">ชนิดกีฬา<input type="text" name="sport" placeholder="เช่น เปตอง"></label>' +
+      '<label class="f">รหัสลิงก์ (อังกฤษตัวเล็ก)<input type="text" name="slug" required placeholder="เช่น petong49" autocapitalize="off"><span class="hint">ลิงก์จะเป็น /c/รหัสนี้</span></label>' +
+      '<label class="f">จำนวนรายการสูงสุดต่อคน<input type="number" name="max_events" value="3" min="0"><span class="hint">0 = ไม่จำกัด</span></label>' +
+      '<label class="f">คำอธิบายเพิ่มเติม (ถ้ามี)<input type="text" name="subtitle" placeholder="เช่น ม.ขอนแก่น 24–30 ต.ค. 2569"></label>' +
+      '<label class="f wide">ไฟล์ Excel รายชื่อนักกีฬา<input type="file" name="file" accept=".xlsx" required>' +
+      '<span class="hint">ต้องมีคอลัมน์: รายการแข่งขัน, โรงเรียน, คำนำหน้า, ชื่อ, นามสกุล, ระดับชั้น, คู่ที่/ทีมที่ (ใช้รูปแบบเดียวกับไฟล์จากระบบรับสมัคร)</span></label>' +
+      '<label class="f wide">โลโก้ (ไม่บังคับ)<input type="file" name="logo" accept="image/*"></label>' +
+      '<div class="wide"><button class="btn primary" type="submit" id="go">สร้างและนำเข้ารายชื่อ</button></div></form></section>';
+    document.getElementById('back').onclick = function () { go('comps'); };
+    document.getElementById('f').onsubmit = function (ev) {
+      ev.preventDefault();
+      var b = document.getElementById('go'); b.disabled = true; b.textContent = 'กำลังนำเข้า…';
+      http('POST', '/api/admin/competitions', new FormData(ev.target)).then(function (d) {
+        C.toast('นำเข้า ' + d.imported.entries + ' รายชื่อ ' + d.imported.events + ' รายการ ' + d.imported.schools + ' โรงเรียน');
+        go('comp/' + d.id + '/schedule');
+      }).catch(function (e) { if (e.status === 401) return fail(e); renderNewComp(errMsg(e)); });
+    };
+  }
+
+  /* ---------- รายละเอียดการแข่งขัน ---------- */
+  var TABS = [['overview', 'ภาพรวม'], ['print', 'พิมพ์ใบรายงานตัว'], ['schedule', 'วันแข่ง / เวลาปิด'], ['logs', 'ประวัติการแก้ไข'], ['settings', 'ตั้งค่า']];
+  function openComp(id, tab) {
+    var load = A.comp && A.comp.id === id ? Promise.resolve() : http('GET', '/api/admin/competitions/' + id).then(function (d) {
+      A.comp = d.comp; A.events = d.events; A.schools = d.schools;
+    });
+    load.then(function () { renderComp(tab); }).catch(fail);
+  }
+  function reloadComp(tab) { A.comp = null; openComp(+location.hash.split('/')[1], tab); }
+  function renderComp(tab) {
+    var c = A.comp, link = location.origin + '/c/' + c.slug;
+    var tabs = TABS.filter(function (t) { return isAdmin() || t[0] !== 'settings'; });
+    app.innerHTML = '<div class="row between"><button class="btn link" id="back">‹ การแข่งขันทั้งหมด</button></div>' +
+      '<section class="card" style="display:grid;gap:12px"><div class="row" style="flex-wrap:nowrap;align-items:flex-start">' + C.logoHtml(c, 'logo') +
+      '<div style="min-width:0"><h2>' + esc(c.name) + '</h2><div class="small muted">' + esc([c.sport ? 'กีฬา' + c.sport : '', c.subtitle].filter(Boolean).join(' · ')) +
+      (c.active ? '' : ' · <span class="danger">ปิดใช้งาน</span>') + '</div>' +
+      '<div class="copy" style="margin-top:6px"><span class="muted">ลิงก์สำหรับโรงเรียน</span><code id="link">' + esc(link) + '</code>' +
+      '<button class="btn" id="copyLink" style="padding:4px 10px">คัดลอก</button><a class="btn" href="/c/' + esc(c.slug) + '" target="_blank" rel="noopener" style="padding:4px 10px;text-decoration:none">เปิด</a></div></div></div>' +
+      '<div class="subtabs" role="tablist">' + tabs.map(function (t) { return '<button role="tab" data-t="' + t[0] + '" aria-selected="' + (t[0] === tab) + '">' + t[1] + '</button>'; }).join('') + '</div>' +
+      '<div id="tab"><div class="loading">กำลังโหลด…</div></div></section>';
+    document.getElementById('back').onclick = function () { A.comp = null; go('comps'); };
+    document.getElementById('copyLink').onclick = function () {
+      navigator.clipboard.writeText(link).then(function () { C.toast('คัดลอกลิงก์แล้ว'); }, function () {
+        var r = document.createRange(); r.selectNode(document.getElementById('link')); getSelection().removeAllRanges(); getSelection().addRange(r);
+      });
+    };
+    app.querySelectorAll('.subtabs button').forEach(function (b) { b.onclick = function () { go('comp/' + c.id + '/' + b.getAttribute('data-t')); }; });
+    ({ overview: tabOverview, print: tabPrint, schedule: tabSchedule, logs: tabLogs, settings: tabSettings }[tab] || tabOverview)();
+  }
+  function tabEl() { return document.getElementById('tab'); }
+
+  function tabOverview() {
+    var c = A.comp;
+    http('GET', '/api/admin/competitions/' + c.id + '/overview').then(function (o) {
+      var t = o.totals, pct = function (a, b) { return b ? Math.round(a / b * 100) : 0; };
+      tabEl().innerHTML = '<div style="display:grid;gap:14px">' +
+        '<div class="row between"><span class="small muted">ข้อมูล ณ ' + new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.</span>' +
+        '<div class="row"><button class="btn" id="refresh">รีเฟรช</button><a class="btn" href="/api/admin/competitions/' + c.id + '/export" style="text-decoration:none">ดาวน์โหลด Excel</a></div></div>' +
+        '<div class="tiles"><div class="tile"><b>' + t.athletesConfirmed + '</b><span>นักกีฬายืนยันแล้ว (คน)</span></div>' +
+        '<div class="tile"><b>' + t.pairsDone + '<small class="muted" style="font-size:15px"> / ' + t.pairsTotal + '</small></b><span>รายการที่โรงเรียนยืนยันแล้ว</span></div>' +
+        '<div class="tile"><b>' + t.entriesConfirmed + '</b><span>สิทธิ์ลงแข่งที่ยืนยัน (คน-รายการ)</span></div>' +
+        '<div class="tile"><b>' + t.entriesWithdrawn + '</b><span>ถอนตัว</span></div></div>' +
+        (o.over.length ? '<div class="errors"><b>ยืนยันเกิน ' + c.max + ' รายการ</b><ul>' + o.over.map(function (p) { return '<li>' + esc(p.name + ' · ' + p.school + ' (' + p.events.join(', ') + ')') + '</li>'; }).join('') + '</ul></div>' : '') +
+        '<h3>ตามวันแข่งขัน</h3><div class="tbl-wrap"><table class="t"><thead><tr><th>วันแข่ง</th><th>ประเภท</th><th>ปิดยืนยัน</th><th>ยืนยันแล้ว</th><th style="width:28%"></th></tr></thead><tbody>' +
+        o.categories.map(function (k) {
+          return '<tr><td>' + thDate(k.startDate) + '</td><td>' + esc(k.category) + '</td><td>' + thDateTime(k.deadline) + (k.closed ? ' <span class="pill off">ปิดแล้ว</span>' : '') + '</td>' +
+            '<td class="num">' + k.done + '/' + k.total + '</td><td><div class="bar"><i style="width:' + pct(k.done, k.total) + '%"></i></div></td></tr>';
+        }).join('') + '</tbody></table></div>' +
+        '<h3>รายโรงเรียน</h3><div class="tbl-wrap"><table class="t"><thead><tr><th>โรงเรียน</th><th>ยืนยัน</th><th>นักกีฬา</th><th>อัปเดตล่าสุด</th></tr></thead><tbody>' +
+        o.schools.map(function (s) {
+          return '<tr><td style="min-width:240px">' + esc(s.school) + '<div class="evgrid">' + s.events.map(function (e) {
+            return '<span class="' + (e.done ? 'y' : 'n') + '" title="' + esc(e.event + (e.done ? ' · ' + e.by + ' ' + e.phone : '')) + '">' + esc(C.levelLabel(e.level) + ' ' + e.short) + '</span>';
+          }).join('') + '</div></td><td class="num">' + s.done + '/' + s.total + '<div class="bar"><i style="width:' + pct(s.done, s.total) + '%"></i></div></td>' +
+            '<td class="num">' + s.athletes + '</td><td class="small">' + esc(s.last ? thDateTime(s.last) : '–') + '</td></tr>';
+        }).join('') + '</tbody></table></div>' +
+        '<p class="hint" style="margin:0">แก้รายชื่อแทนโรงเรียน (รวมถึงหลังปิดยืนยัน): กด "เปิด" ลิงก์สำหรับโรงเรียนด้านบน ระบบจะจำว่าคุณเป็นเจ้าหน้าที่</p></div>';
+      document.getElementById('refresh').onclick = tabOverview;
+    }).catch(fail);
+  }
+
+  /* ---------- พิมพ์ ---------- */
+  function tabPrint() {
+    var dayOpts = C.days(A.events).map(function (d) { return '<option value="' + esc(d.startDate || '') + '">' + thDate(d.startDate) + ' · ' + esc(d.cats.join(', ')) + '</option>'; }).join('');
+    var levels = C.levelsOf(A.events);
+    tabEl().innerHTML = '<div style="display:grid;gap:12px"><p class="small muted" style="margin:0">พิมพ์เฉพาะรายชื่อที่ยืนยันแล้ว (ไม่รวมผู้ถอนตัว) แยกหน้าตามโรงเรียน</p>' +
+      '<div class="print-controls"><label class="f">วันแข่งขัน<select id="pDay">' + dayOpts + '</select></label>' +
+      '<label class="f">โรงเรียน<select id="pSchool"><option value="">ทุกโรงเรียน</option>' + A.schools.map(function (s) { return '<option>' + esc(s) + '</option>'; }).join('') + '</select></label>' +
+      '<label class="f">ระดับ<select id="pLevel"><option value="">ทุกระดับ</option>' + levels.map(function (l) { return '<option value="' + esc(l) + '">' + esc(C.levelLabel(l)) + '</option>'; }).join('') + '</select></label>' +
+      '<label class="toggle"><input type="checkbox" id="pBreak"> ขึ้นหน้าใหม่ทุกรายการ</label></div>' +
+      '<div class="row"><button class="btn primary" id="pMake">สร้างใบรายงานตัว</button><button class="btn" id="pPrint" hidden>พิมพ์</button><span id="pInfo" class="small muted"></span></div>' +
+      '<div id="pSkipped"></div></div>';
+    document.getElementById('pMake').onclick = makePrint;
+    document.getElementById('pPrint').onclick = openPrintWindow;
+  }
+  function sheetHeader() {
+    var c = A.comp;
+    return (c.logo ? '<img src="' + esc(location.origin + c.logo) + '" alt="" class="plogo">' : '') + '<h2>ใบรายงานตัวนักกีฬา</h2><div>' + esc(c.name + (c.sport ? ' · กีฬา' + c.sport : '')) + '</div>';
+  }
+  function makePrint() {
+    var f = { startDate: val('pDay'), school: document.getElementById('pSchool').value, level: document.getElementById('pLevel').value };
+    var brk = document.getElementById('pBreak').checked;
+    document.getElementById('pInfo').textContent = 'กำลังสร้าง…';
+    http('POST', '/api/admin/competitions/' + A.comp.id + '/print', f).then(function (d) {
+      var area = document.getElementById('printArea');
+      area.innerHTML = d.pages.map(function (pg) {
+        return '<div class="sheet">' + pg.blocks.map(function (b, i) {
+          return '<div class="blk' + (brk && i ? ' pb' : '') + '"><div class="hd">' + sheetHeader() + '</div>' +
+            '<div class="meta"><b>โรงเรียน</b><span>' + esc(pg.school) + '</span><b>รายการ</b><span>' + esc(b.event.replace(/^[^:]*:\s*/, '')) + '</span>' +
+            '<b>วันแข่งขัน</b><span>' + thDate(b.startDate, true) + (b.startTime ? ' เริ่ม ' + esc(b.startTime) + ' น.' : '') + '</span></div>' +
+            '<table><thead><tr><th class="c">ที่</th><th style="width:28mm">คู่/ทีม</th><th>ชื่อ - นามสกุล</th><th class="sig">ลงชื่อนักกีฬา</th></tr></thead><tbody>' +
+            (b.rows.length ? b.rows.map(function (r, j) { return '<tr><td class="c">' + (j + 1) + '</td><td>' + esc(r.teamLabel) + '</td><td>' + esc(r.name) + '</td><td class="sig"></td></tr>'; }).join('')
+              : '<tr><td colspan="4" style="text-align:center">ถอนตัวทั้งรายการ</td></tr>') + '</tbody></table>' +
+            '<div class="foot">ยืนยันรายชื่อในระบบโดย ' + esc(b.conf.by) + ' โทร ' + esc(b.conf.phone) + ' เมื่อ ' + esc(thDateTime(b.conf.at)) + '</div>' +
+            '<div class="signs"><div><span>ลงชื่อ ...................................................</span><span>ผู้ควบคุมทีม</span></div>' +
+            '<div><span>ลงชื่อ ...................................................</span><span>เจ้าหน้าที่รับรายงานตัว · เวลา ........ น.</span></div></div></div>';
+        }).join('') + '</div>';
+      }).join('');
+      area.className = d.pages.length ? 'preview' : '';
+      A.printHtml = area.innerHTML;
+      var nb = d.pages.reduce(function (a, p) { return a + p.blocks.length; }, 0);
+      document.getElementById('pInfo').innerHTML = d.pages.length ? esc(d.pages.length + ' โรงเรียน · ' + nb + ' รายการ · กด "พิมพ์" เพื่อเปิดหน้าพิมพ์ (ตัวอย่างอยู่ด้านล่าง)')
+        : '<span class="pill bad">ยังไม่มีรายการที่ยืนยันตามเงื่อนไขนี้</span> ใบรายงานตัวพิมพ์ได้หลังโรงเรียนกดยืนยันรายชื่อแล้ว';
+      document.getElementById('pPrint').hidden = !d.pages.length;
+      document.getElementById('pSkipped').innerHTML = d.skipped.length ? '<div class="locked small"><b>ยังไม่ยืนยัน จึงไม่ได้พิมพ์ (' + d.skipped.length + ')</b><br>' +
+        d.skipped.map(function (s) { return esc(s.school + ' · ' + C.levelLabel(s.level) + ' ' + s.short); }).join('<br>') + '</div>' : '';
+      if (d.pages.length) area.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }).catch(fail);
+  }
+  function hidePrint() { var p = document.getElementById('printArea'); p.className = ''; p.innerHTML = ''; A.printHtml = ''; }
+  var PRINT_CSS = '@page{size:A4;margin:12mm}body{margin:0;background:#ebe7f1;font-family:Sarabun,"IBM Plex Sans Thai",sans-serif;color:#000}' +
+    '.bar{position:sticky;top:0;background:#33166b;border-bottom:4px solid #e6b820;color:#fff;padding:10px 16px;display:flex;gap:12px;align-items:center;font-size:15px;flex-wrap:wrap}' +
+    '.bar button{font:inherit;font-weight:600;padding:8px 18px;border:0;border-radius:8px;background:#e6b820;color:#2a1158;cursor:pointer}' +
+    '.sheets{display:grid;gap:16px;justify-items:center;padding:16px}' +
+    '.sheet{background:#fff;width:210mm;max-width:100%;box-sizing:border-box;padding:12mm;font-size:15px;line-height:1.45;box-shadow:0 2px 10px rgba(0,0,0,.18)}' +
+    '.plogo{height:18mm;display:block;margin:0 auto 2mm}.blk+.blk{margin-top:9mm;padding-top:6mm;border-top:1px dashed #999}.hd{text-align:center;margin-bottom:4mm}.hd h2{font-size:21px;margin:0}' +
+    '.meta{display:grid;grid-template-columns:auto 1fr;gap:1mm 4mm;margin-bottom:3mm}table{width:100%;border-collapse:collapse}' +
+    'th,td{border:1px solid #000;padding:1.6mm 2.4mm;text-align:left}th{background:#eee}td.c,th.c{text-align:center;width:12mm}td.sig,th.sig{width:45mm}' +
+    '.foot{margin-top:3mm;font-size:13.5px}.signs{display:grid;grid-template-columns:1fr 1fr;gap:8mm;margin-top:8mm;text-align:center;font-size:14px}.signs div{display:grid;gap:1mm}' +
+    '@media print{body{background:#fff}.bar{display:none}.sheets{display:block;padding:0}.sheet{box-shadow:none;width:auto;padding:0;page-break-after:always;break-after:page}' +
+    '.sheet:last-child{page-break-after:auto;break-after:auto}.blk.pb{break-before:page;page-break-before:always;border-top:0;margin-top:0;padding-top:0}' +
+    'th{-webkit-print-color-adjust:exact;print-color-adjust:exact}}';
+  function openPrintWindow() {
+    if (!A.printHtml) { C.toast('กด "สร้างใบรายงานตัว" ก่อน'); return; }
+    var w = null;
+    try { w = window.open('', '_blank'); } catch (e) { w = null; }
+    if (!w) { try { window.print(); } catch (e) { C.toast('กด ⌘P / Ctrl+P เพื่อพิมพ์'); } return; }
+    w.document.open();
+    w.document.write('<!doctype html><html lang="th"><head><meta charset="utf-8"><title>ใบรายงานตัวนักกีฬา</title>' +
+      '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap">' +
+      '<style>' + PRINT_CSS + '</style></head><body><div class="bar"><button onclick="window.print()">พิมพ์ / บันทึกเป็น PDF</button>' +
+      '<span>ตั้งค่ากระดาษ A4 · ถ้าไม่ขึ้นหน้าต่างพิมพ์ กด ⌘P หรือ Ctrl+P</span></div><div class="sheets">' + A.printHtml + '</div>' +
+      '<script>window.addEventListener("load",function(){setTimeout(function(){window.print()},600)})<\/script></body></html>');
+    w.document.close();
+  }
+
+  /* ---------- วันแข่ง / เวลาปิด ---------- */
+  function dl(s) { return (s || '').replace(' ', 'T').slice(0, 16); }
+  function dayBefore18(date) {
+    var m = String(date || '').match(/(\d{4})-(\d{2})-(\d{2})/); if (!m) return '';
+    var d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3] - 1));
+    return d.toISOString().slice(0, 10) + 'T18:00';
+  }
+  function tabSchedule() {
+    var ro = !isAdmin(), dis = ro ? ' disabled' : '';
+    var cats = [];
+    A.events.forEach(function (e) { if (cats.indexOf(e.category) < 0) cats.push(e.category); });
+    tabEl().innerHTML = '<div style="display:grid;gap:14px">' +
+      (ro ? '<div class="locked small">ดูได้อย่างเดียว เฉพาะผู้ดูแลระบบแก้ไขวันแข่งได้</div>' :
+        '<p class="small muted" style="margin:0">ตั้งวันแข่งทีละประเภทแล้วกด "ใช้กับทั้งประเภท" หรือแก้ทีละรายการในตารางด้านล่าง เสร็จแล้วกด "บันทึก" ถ้าเว้นเวลาปิดยืนยันว่างไว้ รายการนั้นจะเปิดรับยืนยันตลอด</p>') +
+      '<h3>ตั้งทั้งประเภท</h3><div class="tbl-wrap"><table class="t"><thead><tr><th>ประเภท</th><th>วันแข่ง</th><th>เวลาเริ่ม</th><th>ปิดยืนยัน</th><th></th></tr></thead><tbody>' +
+      cats.map(function (k, i) {
+        var e0 = A.events.filter(function (e) { return e.category === k; })[0];
+        return '<tr><td>' + esc(k) + '</td><td><input type="date" id="cd' + i + '" value="' + esc(e0.startDate) + '"' + dis + '></td>' +
+          '<td><input type="text" id="ct' + i + '" value="' + esc(e0.startTime) + '" placeholder="08.30" style="width:80px"' + dis + '></td>' +
+          '<td><input type="datetime-local" id="cl' + i + '" value="' + esc(dl(e0.deadline)) + '"' + dis + '></td>' +
+          '<td>' + (ro ? '' : '<button class="btn" data-cat="' + i + '">ใช้กับทั้งประเภท</button>') + '</td></tr>';
+      }).join('') + '</tbody></table></div>' +
+      (ro ? '' : '<div class="row"><button class="btn" id="auto18">ตั้งเวลาปิด = 18.00 น. ของวันก่อนวันแข่ง (ทุกรายการที่มีวันแข่ง)</button></div>') +
+      '<h3>รายการทั้งหมด</h3><div class="tbl-wrap"><table class="t"><thead><tr><th>ระดับ</th><th>ชื่อย่อ</th><th>วันแข่ง</th><th>เวลาเริ่ม</th><th>ปิดยืนยัน</th></tr></thead><tbody>' +
+      A.events.map(function (e) {
+        return '<tr data-id="' + e.id + '" data-cat="' + esc(e.category) + '"><td class="small">' + esc(C.levelLabel(e.level)) + '</td>' +
+          '<td><input type="text" class="e-short" value="' + esc(e.short) + '" title="' + esc(e.event) + '"' + dis + '></td>' +
+          '<td><input type="date" class="e-date" value="' + esc(e.startDate) + '"' + dis + '></td>' +
+          '<td><input type="text" class="e-time" value="' + esc(e.startTime) + '" placeholder="08.30" style="width:80px"' + dis + '></td>' +
+          '<td><input type="datetime-local" class="e-dl" value="' + esc(dl(e.deadline)) + '"' + dis + '></td></tr>';
+      }).join('') + '</tbody></table></div>' +
+      (ro ? '' : '<div class="row"><button class="btn primary" id="saveEv">บันทึก</button><span id="evInfo" class="small muted"></span></div>') + '</div>';
+    if (ro) return;
+    tabEl().querySelectorAll('[data-cat]').forEach(function (b) {
+      if (b.tagName !== 'BUTTON') return;
+      b.onclick = function () {
+        var i = b.getAttribute('data-cat'), k = cats[i];
+        tabEl().querySelectorAll('tr[data-id]').forEach(function (tr) {
+          if (tr.getAttribute('data-cat') !== k) return;
+          tr.querySelector('.e-date').value = val('cd' + i); tr.querySelector('.e-time').value = val('ct' + i); tr.querySelector('.e-dl').value = val('cl' + i);
+        });
+        document.getElementById('evInfo').textContent = 'ใส่ค่าให้ประเภท ' + k + ' แล้ว อย่าลืมกดบันทึก';
+      };
+    });
+    document.getElementById('auto18').onclick = function () {
+      var n = 0;
+      tabEl().querySelectorAll('tr[data-id]').forEach(function (tr) {
+        var d = tr.querySelector('.e-date').value; if (d) { tr.querySelector('.e-dl').value = dayBefore18(d); n++; }
+      });
+      document.getElementById('evInfo').textContent = n ? 'ตั้งเวลาปิดให้ ' + n + ' รายการแล้ว อย่าลืมกดบันทึก' : 'ยังไม่มีรายการที่ใส่วันแข่ง';
+    };
+    document.getElementById('saveEv').onclick = function () {
+      var items = [];
+      tabEl().querySelectorAll('tr[data-id]').forEach(function (tr) {
+        items.push({ id: +tr.getAttribute('data-id'), short: tr.querySelector('.e-short').value, startDate: tr.querySelector('.e-date').value,
+          startTime: tr.querySelector('.e-time').value, deadline: tr.querySelector('.e-dl').value });
+      });
+      http('POST', '/api/admin/competitions/' + A.comp.id + '/events', { events: items }).then(function (d) {
+        A.events = d.events; C.toast('บันทึกวันแข่งแล้ว'); tabSchedule();
+      }).catch(fail);
+    };
+  }
+
+  /* ---------- ประวัติ ---------- */
+  function tabLogs() {
+    http('GET', '/api/admin/competitions/' + A.comp.id + '/logs').then(function (d) {
+      tabEl().innerHTML = d.logs.length ? '<p class="hint">300 รายการล่าสุด ดูทั้งหมดได้ในไฟล์ Excel</p><div class="tbl-wrap"><table class="t"><thead><tr><th>เวลา</th><th>โรงเรียน / รายการ</th><th>การกระทำ</th><th>ก่อน → หลัง</th><th>ผู้แก้ไข</th></tr></thead><tbody>' +
+        d.logs.map(function (l) {
+          return '<tr><td class="small num" style="white-space:nowrap">' + esc(thDateTime(l.at)) + '</td><td class="small">' + esc(l.school || '') + '<br><span class="muted">' + esc((l.event || '').replace(/^[^:]*:\s*/, '')) + '</span></td>' +
+            '<td>' + esc(l.action) + '</td><td class="small">' + esc(l.before || '') + (l.before ? ' → ' : '') + esc(l.after || '') + '</td>' +
+            '<td class="small">' + esc(l.by || '') + (l.phone ? ' · ' + esc(l.phone) : '') + (l.user ? '<br><span class="muted">บัญชี ' + esc(l.user) + '</span>' : '') + '</td></tr>';
+        }).join('') + '</tbody></table></div>' : '<p class="muted">ยังไม่มีการแก้ไข</p>';
+    }).catch(fail);
+  }
+
+  /* ---------- ตั้งค่า ---------- */
+  function tabSettings() {
+    var c = A.comp;
+    tabEl().innerHTML = '<div style="display:grid;gap:18px"><form id="sf" class="grid-form">' +
+      '<label class="f wide">ชื่อการแข่งขัน<input type="text" name="name" value="' + esc(c.name) + '"></label>' +
+      '<label class="f">ชนิดกีฬา<input type="text" name="sport" value="' + esc(c.sport) + '"></label>' +
+      '<label class="f">รหัสลิงก์<input type="text" name="slug" value="' + esc(c.slug) + '" autocapitalize="off"></label>' +
+      '<label class="f">จำนวนรายการสูงสุดต่อคน<input type="number" name="max_events" value="' + c.max + '" min="0"></label>' +
+      '<label class="f">คำอธิบายเพิ่มเติม<input type="text" name="subtitle" value="' + esc(c.subtitle) + '"></label>' +
+      '<label class="f">โลโก้ใหม่ (ถ้าต้องการเปลี่ยน)<input type="file" name="logo" accept="image/*"></label>' +
+      '<label class="toggle"><input type="checkbox" id="sActive"' + (c.active ? ' checked' : '') + '> เปิดให้โรงเรียนเข้ายืนยัน</label>' +
+      '<div class="wide"><button class="btn primary" type="submit">บันทึกการตั้งค่า</button></div></form>' +
+      '<section style="display:grid;gap:10px;border-top:1px solid var(--line);padding-top:16px"><h3>นำเข้ารายชื่อใหม่</h3>' +
+      '<p class="small muted" style="margin:0">ใช้เมื่อได้ไฟล์รายชื่อฉบับแก้ไขจากระบบรับสมัคร ระบบจะแทนที่รายชื่อทั้งหมด <b class="danger">และลบการยืนยันที่มีอยู่</b> แต่คงวันแข่ง/เวลาปิดของรายการที่ชื่อเหมือนเดิมไว้</p>' +
+      '<form id="rf" class="row"><input type="file" name="file" accept=".xlsx" required><label class="toggle"><input type="checkbox" name="confirm" value="yes"> เข้าใจแล้ว ลบการยืนยันเดิม</label>' +
+      '<button class="btn danger" type="submit">นำเข้าใหม่</button></form></section>' +
+      '<section style="display:grid;gap:10px;border-top:1px solid var(--line);padding-top:16px"><h3 class="danger">ลบการแข่งขันนี้</h3>' +
+      '<p class="small muted" style="margin:0">ลบรายชื่อ การยืนยัน ประวัติ และโลโก้ของงานนี้ทั้งหมด <b class="danger">กู้คืนไม่ได้</b> ถ้าแค่ไม่อยากให้โรงเรียนเห็น ให้เอาติ๊ก "เปิดให้โรงเรียนเข้ายืนยัน" ออกแทน แนะนำให้ดาวน์โหลด Excel เก็บไว้ก่อนลบ</p>' +
+      '<form id="df" class="row"><input type="text" id="delSlug" placeholder="พิมพ์ ' + esc(c.slug) + ' เพื่อยืนยัน" autocapitalize="off" style="max-width:260px">' +
+      '<button class="btn danger" type="submit">ลบถาวร</button></form></section></div>';
+    document.getElementById('sf').onsubmit = function (ev) {
+      ev.preventDefault();
+      var fd = new FormData(ev.target); fd.append('active', document.getElementById('sActive').checked ? '1' : '0');
+      http('POST', '/api/admin/competitions/' + c.id, fd).then(function () { C.toast('บันทึกแล้ว'); reloadComp('settings'); }).catch(fail);
+    };
+    document.getElementById('df').onsubmit = function (ev) {
+      ev.preventDefault();
+      http('POST', '/api/admin/competitions/' + c.id + '/delete', { confirm: val('delSlug') }).then(function () {
+        C.toast('ลบการแข่งขันแล้ว'); A.comp = null; go('comps');
+      }).catch(fail);
+    };
+    document.getElementById('rf').onsubmit = function (ev) {
+      ev.preventDefault();
+      http('POST', '/api/admin/competitions/' + c.id + '/import', new FormData(ev.target)).then(function (d) {
+        C.toast('นำเข้า ' + d.imported.entries + ' รายชื่อแล้ว'); reloadComp('schedule');
+      }).catch(fail);
+    };
+  }
+
+  /* ---------- บัญชีเจ้าหน้าที่ ---------- */
+  function renderUsers(msg) {
+    http('GET', '/api/admin/users').then(function (d) {
+      app.innerHTML = '<section class="card" style="display:grid;gap:14px"><h2>บัญชีเจ้าหน้าที่</h2>' +
+        '<p class="small muted" style="margin:0"><b>ผู้ดูแลระบบ</b> จัดการการแข่งขันและบัญชีได้ · <b>เจ้าหน้าที่</b> ดูภาพรวม พิมพ์ใบรายงานตัว ส่งออก Excel และแก้รายชื่อแทนโรงเรียนได้แม้เลยเวลาปิด</p>' +
+        (msg ? '<div class="errors">' + esc(msg) + '</div>' : '') +
+        '<div class="tbl-wrap"><table class="t"><thead><tr><th>ชื่อผู้ใช้</th><th>ชื่อที่แสดง</th><th>บทบาท</th><th>ใช้งาน</th><th>ตั้งรหัสผ่านใหม่</th><th>เข้าล่าสุด</th><th></th></tr></thead><tbody>' +
+        d.users.map(function (u) {
+          return '<tr data-id="' + u.id + '"><td><b>' + esc(u.username) + '</b></td><td><input type="text" class="u-name" value="' + esc(u.name) + '"></td>' +
+            '<td><select class="u-role"><option value="staff"' + (u.role === 'staff' ? ' selected' : '') + '>เจ้าหน้าที่</option><option value="admin"' + (u.role === 'admin' ? ' selected' : '') + '>ผู้ดูแลระบบ</option></select></td>' +
+            '<td><input type="checkbox" class="u-active"' + (u.active ? ' checked' : '') + ' aria-label="ใช้งาน"></td>' +
+            '<td><input type="password" class="u-pw" placeholder="เว้นว่าง = ไม่เปลี่ยน" autocomplete="new-password"></td>' +
+            '<td class="small">' + esc(u.last_login ? thDateTime(u.last_login) : '–') + '</td><td style="white-space:nowrap"><button class="btn u-save">บันทึก</button> ' +
+            (u.id === A.me.id ? '' : '<button class="btn danger u-del" data-name="' + esc(u.username) + '">ลบ</button>') + '</td></tr>';
+        }).join('') + '</tbody></table></div>' +
+        '<h3>เพิ่มบัญชี</h3><form id="uf" class="grid-form"><label class="f">ชื่อผู้ใช้ (อังกฤษ)<input type="text" name="username" autocapitalize="off" required></label>' +
+        '<label class="f">ชื่อที่แสดง<input type="text" name="name"></label><label class="f">รหัสผ่าน (อย่างน้อย 8 ตัว)<input type="password" name="password" autocomplete="new-password" required></label>' +
+        '<label class="f">บทบาท<select name="role"><option value="staff">เจ้าหน้าที่</option><option value="admin">ผู้ดูแลระบบ</option></select></label>' +
+        '<div class="wide"><button class="btn primary" type="submit">เพิ่มบัญชี</button></div></form></section>';
+      app.querySelectorAll('.u-save').forEach(function (b) {
+        b.onclick = function () {
+          var tr = b.closest('tr');
+          http('POST', '/api/admin/users/' + tr.getAttribute('data-id'), { name: tr.querySelector('.u-name').value, role: tr.querySelector('.u-role').value,
+            active: tr.querySelector('.u-active').checked, password: tr.querySelector('.u-pw').value || undefined })
+            .then(function () { C.toast('บันทึกแล้ว'); renderUsers(); }).catch(function (e) { if (e.status === 401) return fail(e); renderUsers(errMsg(e)); });
+        };
+      });
+      app.querySelectorAll('.u-del').forEach(function (b) {
+        b.onclick = function () {
+          if (!window.confirm('ลบบัญชี ' + b.getAttribute('data-name') + ' ? (ประวัติการแก้ไขเดิมยังเก็บชื่อบัญชีไว้)')) return;
+          http('POST', '/api/admin/users/' + b.closest('tr').getAttribute('data-id') + '/delete')
+            .then(function () { C.toast('ลบบัญชีแล้ว'); renderUsers(); }).catch(function (e) { if (e.status === 401) return fail(e); renderUsers(errMsg(e)); });
+        };
+      });
+      document.getElementById('uf').onsubmit = function (ev) {
+        ev.preventDefault();
+        var o = {}; new FormData(ev.target).forEach(function (v, k) { o[k] = v; });
+        http('POST', '/api/admin/users', o).then(function () { C.toast('เพิ่มบัญชีแล้ว'); renderUsers(); })
+          .catch(function (e) { if (e.status === 401) return fail(e); renderUsers(errMsg(e)); });
+      };
+    }).catch(fail);
+  }
+
+  function renderPassword(msg) {
+    app.innerHTML = '<section class="card center-card" style="display:grid;gap:12px"><h2>เปลี่ยนรหัสผ่าน</h2>' + (msg ? '<div class="errors">' + esc(msg) + '</div>' : '') +
+      '<label class="f">รหัสผ่านปัจจุบัน<input type="password" id="pw0" autocomplete="current-password"></label>' +
+      '<label class="f">รหัสผ่านใหม่ (อย่างน้อย 8 ตัว)<input type="password" id="pw1" autocomplete="new-password"></label>' +
+      '<button class="btn primary" id="pwGo">บันทึก</button></section>';
+    document.getElementById('pwGo').onclick = function () {
+      http('POST', '/api/auth/password', { current: document.getElementById('pw0').value, 'new': document.getElementById('pw1').value })
+        .then(function () { C.toast('เปลี่ยนรหัสผ่านแล้ว'); go('comps'); }).catch(function (e) { renderPassword(errMsg(e)); });
+    };
+  }
+
+  boot();
+})();
+</script>
+</body>
+</html>

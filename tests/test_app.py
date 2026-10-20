@@ -1,0 +1,126 @@
+"""ทดสอบระบบด้วยข้อมูลสมมติ:  python3 -m pytest -q"""
+import io
+
+import pytest
+from openpyxl import Workbook
+
+from checkin import create_app
+
+H = {'X-Requested-With': 'checkin'}
+HEADER = ['รายการแข่งขัน/ประเภทกีฬา', 'โรงเรียนที่เข้าร่วมการแข่งขัน', 'คำนำหน้า', 'ชื่อ', 'นามสกุล', 'ระดับชั้น', 'คู่ที่/ทีมที่/มือวาง']
+ROWS = [
+    ['เปตอง : เดี่ยว ประถมศึกษา บุคคล ชาย', 'โรงเรียนเอ', 'ด.ช.', 'หนึ่ง', 'ทดสอบ', 'ประถมศึกษา', 999],
+    ['เปตอง : ประถมศึกษา Shooting 1 คน ชาย', 'โรงเรียนเอ', 'ด.ช.', 'หนึ่ง', 'ทดสอบ', 'ประถมศึกษา', 999],
+    ['เปตอง : ประถมศึกษา คู่ ชาย', 'โรงเรียนเอ', 'ด.ช.', 'หนึ่ง', 'ทดสอบ', 'ประถมศึกษา', 1],
+    ['เปตอง : ประถมศึกษา คู่ ชาย', 'โรงเรียนเอ', 'ด.ช.', 'สอง', 'ทดสอบ', 'ประถมศึกษา', 1],
+    ['เปตอง : ประถมศึกษา ทีม 3 คน ชาย', 'โรงเรียนเอ', 'ด.ช.', 'หนึ่ง', 'ทดสอบ', 'ประถมศึกษา', 999],
+    ['เปตอง : ประถมศึกษา ทีม 3 คน ชาย', 'โรงเรียนเอ', 'ด.ช.', 'สาม', 'ทดสอบ', 'ประถมศึกษา', 999],
+    ['เปตอง : ประถมศึกษา ทีม 3 คน ชาย', 'โรงเรียนบี', 'ด.ช.', 'สี่', 'ทดสอบ', 'ประถมศึกษา', 1],
+]
+
+
+def xlsx():
+    wb = Workbook()
+    ws = wb.active
+    ws.append(HEADER)
+    for r in ROWS:
+        ws.append(r)
+    b = io.BytesIO()
+    wb.save(b)
+    b.seek(0)
+    return b
+
+
+@pytest.fixture
+def client(tmp_path):
+    app = create_app(str(tmp_path))
+    app.config['TESTING'] = True
+    return app.test_client()
+
+
+def setup_comp(c):
+    assert c.post('/api/auth/setup', json={'username': 'admin', 'password': 'password123', 'name': 'แอดมิน'}, headers=H).status_code == 200
+    r = c.post('/api/admin/competitions', headers=H, content_type='multipart/form-data',
+               data={'name': 'งานทดสอบ', 'sport': 'เปตอง', 'slug': 'test', 'max_events': '3', 'file': (xlsx(), 'a.xlsx')})
+    assert r.status_code == 200, r.json
+    assert r.json['imported'] == {'entries': 7, 'events': 4, 'schools': 2}
+    return r.json['id']
+
+
+def submit(c, event_name, school='โรงเรียนเอ', withdraw=()):
+    v = c.post('/api/c/test/school', json={'school': school}, headers=H).json
+    ev = next(e for e in v['events'] if e['event'] == event_name)
+    items = [dict(id=x['id'], prefix=x['prefix'], first=x['first'], last=x['last'], withdrawn=x['first'] in withdraw) for x in ev['entries']]
+    return c.post('/api/c/test/submit', headers=H, json={'school': school, 'event': event_name, 'by': 'ครู', 'phone': '0812345678', 'items': items}).json
+
+
+def test_csrf_header_required(client):
+    assert client.post('/api/auth/login', json={}).status_code == 400
+
+
+def test_setup_only_once(client):
+    setup_comp(client)
+    assert client.post('/api/auth/setup', json={'username': 'x2', 'password': 'password123'}, headers=H).status_code == 403
+
+
+def test_max_three_events_and_withdraw(client):
+    setup_comp(client)
+    client.post('/api/auth/logout', headers=H)          # โรงเรียนไม่ต้องล็อกอิน
+    for name in ['เปตอง : เดี่ยว ประถมศึกษา บุคคล ชาย', 'เปตอง : ประถมศึกษา Shooting 1 คน ชาย', 'เปตอง : ประถมศึกษา คู่ ชาย']:
+        assert submit(client, name)['ok']
+    r = submit(client, 'เปตอง : ประถมศึกษา ทีม 3 คน ชาย')
+    assert not r['ok'] and 'ยืนยันได้สูงสุด 3 รายการ' in r['errors'][0]
+    assert submit(client, 'เปตอง : ประถมศึกษา ทีม 3 คน ชาย', withdraw=('หนึ่ง',))['ok']
+
+
+def test_labels_for_unspecified_team(client):
+    setup_comp(client)
+    v = client.post('/api/c/test/school', json={'school': 'โรงเรียนเอ'}, headers=H).json
+    labels = {e['short']: e['entries'][0]['teamLabel'] for e in v['events']}
+    assert labels['เดี่ยวชาย'] == 'บุคคล'
+    assert labels['ทีม 3 คน ชาย'] == 'ไม่ระบุทีม'
+    assert labels['คู่ชาย'] == 'คู่ที่ 1'
+
+
+def test_deadline_blocks_public_but_not_staff(client):
+    cid = setup_comp(client)
+    evs = client.get(f'/api/admin/competitions/{cid}', headers=H).json['events']
+    client.post(f'/api/admin/competitions/{cid}/events', headers=H, json={'events': [
+        dict(id=e['id'], short=e['short'], startDate='2020-01-02', startTime='08.30', deadline='2020-01-01 18:00') for e in evs]})
+    assert submit(client, 'เปตอง : ประถมศึกษา คู่ ชาย')['ok']          # เจ้าหน้าที่ยังแก้ได้
+    client.post('/api/auth/logout', headers=H)
+    r = submit(client, 'เปตอง : ประถมศึกษา คู่ ชาย')
+    assert not r['ok'] and 'ปิดรับยืนยัน' in r['errors'][0]
+
+
+def test_admin_routes_need_login_and_role(client):
+    cid = setup_comp(client)
+    client.post('/api/admin/users', headers=H, json={'username': 'staff1', 'password': 'password123', 'role': 'staff'})
+    client.post('/api/auth/logout', headers=H)
+    assert client.get(f'/api/admin/competitions/{cid}/overview').status_code == 401
+    assert client.post('/api/auth/login', headers=H, json={'username': 'staff1', 'password': 'password123'}).status_code == 200
+    assert client.get(f'/api/admin/competitions/{cid}/overview').status_code == 200
+    assert client.get(f'/api/admin/competitions/{cid}/export').status_code == 200
+    assert client.get('/api/admin/users').status_code == 403
+    assert client.post(f'/api/admin/competitions/{cid}', headers=H, json={'name': 'x'}).status_code == 403
+
+
+def test_print_only_confirmed(client):
+    cid = setup_comp(client)
+    submit(client, 'เปตอง : ประถมศึกษา คู่ ชาย')
+    d = client.post(f'/api/admin/competitions/{cid}/print', headers=H, json={}).json
+    assert len(d['pages']) == 1 and d['pages'][0]['blocks'][0]['rows'][0]['name'] == 'ด.ช.หนึ่ง ทดสอบ'
+    assert len(d['skipped']) == 4
+
+
+def test_delete_competition_and_user(client):
+    cid = setup_comp(client)
+    assert client.post(f'/api/admin/competitions/{cid}/delete', headers=H, json={'confirm': 'wrong'}).status_code == 400
+    assert client.post(f'/api/admin/competitions/{cid}/delete', headers=H, json={'confirm': 'test'}).json['ok']
+    assert client.get('/api/c/test/info').status_code == 404
+    client.post('/api/admin/users', headers=H, json={'username': 'staff1', 'password': 'password123', 'role': 'staff'})
+    users = client.get('/api/admin/users').json['users']
+    me = next(u for u in users if u['username'] == 'admin')
+    other = next(u for u in users if u['username'] == 'staff1')
+    assert client.post(f"/api/admin/users/{me['id']}/delete", headers=H).status_code == 400
+    assert client.post(f"/api/admin/users/{other['id']}/delete", headers=H).json['ok']

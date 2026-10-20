@@ -1,0 +1,67 @@
+"""คำสั่งจัดการระบบจาก Terminal
+
+  python3 manage.py create-user <username> --role admin|staff [--name "ชื่อ"]
+  python3 manage.py reset-password <username>
+  python3 manage.py list-users
+"""
+import argparse
+import getpass
+import sys
+
+from werkzeug.security import generate_password_hash
+
+from checkin import create_app
+from checkin.auth import create_user, validate_password, validate_username
+from checkin.db import connect
+
+
+def ask_password():
+    while True:
+        p = getpass.getpass('รหัสผ่าน: ')
+        e = validate_password(p)
+        if e:
+            print(e)
+            continue
+        if getpass.getpass('ยืนยันรหัสผ่าน: ') != p:
+            print('รหัสผ่านไม่ตรงกัน')
+            continue
+        return p
+
+
+def main():
+    ap = argparse.ArgumentParser(description='จัดการระบบยืนยันรายชื่อนักกีฬา')
+    sub = ap.add_subparsers(dest='cmd', required=True)
+    c = sub.add_parser('create-user', help='สร้างบัญชีเจ้าหน้าที่')
+    c.add_argument('username')
+    c.add_argument('--role', choices=['admin', 'staff'], default='staff')
+    c.add_argument('--name', default='')
+    r = sub.add_parser('reset-password', help='ตั้งรหัสผ่านใหม่')
+    r.add_argument('username')
+    sub.add_parser('list-users', help='แสดงบัญชีทั้งหมด')
+    a = ap.parse_args()
+
+    app = create_app()
+    conn = connect(app.config['DATABASE'])
+    if a.cmd == 'create-user':
+        e = validate_username(a.username)
+        if e:
+            sys.exit(e)
+        if conn.execute('SELECT 1 FROM users WHERE username=?', (a.username,)).fetchone():
+            sys.exit('มีชื่อผู้ใช้นี้แล้ว')
+        with conn:
+            create_user(conn, a.username, a.name or a.username, ask_password(), a.role)
+        print(f'สร้างบัญชี {a.username} ({a.role}) แล้ว')
+    elif a.cmd == 'reset-password':
+        if not conn.execute('SELECT 1 FROM users WHERE username=?', (a.username,)).fetchone():
+            sys.exit('ไม่พบชื่อผู้ใช้นี้')
+        with conn:
+            conn.execute('UPDATE users SET password_hash=?, active=1 WHERE username=?',
+                         (generate_password_hash(ask_password()), a.username))
+        print('ตั้งรหัสผ่านใหม่แล้ว')
+    elif a.cmd == 'list-users':
+        for u in conn.execute('SELECT username, name, role, active, last_login FROM users ORDER BY id'):
+            print(f"{u['username']:<20} {u['role']:<6} {'ใช้งาน' if u['active'] else 'ปิด':<6} {u['name']}  เข้าล่าสุด {u['last_login'] or '-'}")
+
+
+if __name__ == '__main__':
+    main()

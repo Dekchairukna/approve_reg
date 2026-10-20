@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ยืนยันรายชื่อนักกีฬา</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Kanit:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&family=Sarabun:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="band">
+  <div class="wrap">
+    <div class="band-top">
+      <div class="brand" id="brand"><div class="logo-ph"></div><div><div class="games">&nbsp;</div><h1>ยืนยันรายชื่อนักกีฬา</h1></div></div>
+      <div class="staffbar" id="staffbar"></div>
+    </div>
+    <div class="deadlines" id="deadlines"></div>
+  </div>
+</header>
+<main><div class="wrap" id="app"><div class="loading">กำลังโหลดข้อมูล…</div></div></main>
+<div class="toast" id="toast" hidden></div>
+
+<script src="/static/common.js"></script>
+<script>
+(function () {
+  var esc = C.esc, norm = C.norm, thDate = C.thDate, thDateTime = C.thDateTime;
+  var ST = { PENDING: 'รอยืนยัน', OK: 'ยืนยัน', OUT: 'ถอนตัว' };
+  var PREFIXES = ['ด.ช.', 'ด.ญ.', 'นาย', 'น.ส.', 'นาง'];
+  var slug = decodeURIComponent(location.pathname.split('/')[2] || '');
+  var base = '/api/c/' + encodeURIComponent(slug);
+  var S = { comp: null, schools: [], events: [], levels: [], staff: null, view: null, level: '', ev: null, draft: null, errors: [] };
+  var app = document.getElementById('app');
+  function pkey(f, l) { return norm(f) + norm(l); }
+  function errMsg(e) { return (e && (e.message || e)) + ''; }
+
+  function renderHeader() {
+    var c = S.comp;
+    document.title = 'ยืนยันรายชื่อ · ' + c.name;
+    document.getElementById('brand').innerHTML = C.logoHtml(c) +
+      '<div><div class="games">' + esc(c.name) + '</div><h1>ยืนยันรายชื่อนักกีฬา' + esc(c.sport || '') + '</h1></div>';
+    document.getElementById('staffbar').innerHTML = S.staff
+      ? '<span>เจ้าหน้าที่: <b>' + esc(S.staff) + '</b></span><a href="/admin">หลังบ้าน</a>' : '';
+  }
+  function renderDeadlines() {
+    document.getElementById('deadlines').innerHTML = C.days(S.events).map(function (d) {
+      var ms = C.toMs(d.deadline), open = isNaN(ms) || Date.now() <= ms;
+      return '<div class="dl ' + (open ? 'open' : 'closed') + '"><b>' + esc(d.cats.join(' · ')) + '</b>' +
+        '<span class="when">แข่ง ' + thDate(d.startDate) + '</span>' +
+        '<span class="when">ปิดยืนยัน ' + thDateTime(d.deadline) + '</span>' +
+        '<span class="st num">' + (isNaN(ms) ? 'เปิดรับยืนยัน' : open ? C.left(ms) : 'ปิดรับแล้ว') + '</span></div>';
+    }).join('');
+  }
+
+  /* ขั้นที่ 1: เลือกโรงเรียน */
+  function renderSchools() {
+    app.innerHTML = '<section class="card" style="display:grid;gap:12px">' +
+      '<div><div class="step">ขั้นที่ 1 จาก 3</div><h2>เลือกโรงเรียน</h2></div>' +
+      '<input type="search" id="q" placeholder="พิมพ์ค้นหาชื่อโรงเรียน" autocomplete="off">' +
+      '<div class="school-list" id="schoolList"></div>' +
+      '<p class="small muted" style="margin:0">ยืนยันได้จนถึงเวลาปิดของแต่ละรายการ' +
+      (S.comp.max ? ' · นักกีฬา 1 คน ยืนยันได้ไม่เกิน ' + S.comp.max + ' รายการ' : '') + '</p></section>';
+    document.getElementById('q').addEventListener('input', fillSchools);
+    fillSchools();
+  }
+  function fillSchools() {
+    var q = norm(document.getElementById('q').value);
+    var list = S.schools.filter(function (s) { return !q || norm(s).indexOf(q) >= 0; });
+    var box = document.getElementById('schoolList');
+    box.innerHTML = list.length ? list.map(function (s) {
+      return '<button class="school-btn" data-s="' + esc(s) + '"><span>' + esc(s) + '</span><span aria-hidden="true" class="muted">›</span></button>';
+    }).join('') : '<p class="muted">ไม่พบโรงเรียนที่ค้นหา</p>';
+    box.querySelectorAll('button').forEach(function (b) { b.onclick = function () { openSchool(b.getAttribute('data-s')); }; });
+  }
+  function openSchool(s) {
+    app.innerHTML = '<div class="loading">กำลังโหลดรายชื่อ…</div>';
+    return C.http('POST', base + '/school', { school: s }).then(function (v) {
+      S.view = v; S.ev = null;
+      var lv = C.levelsOf(v.events);
+      if (lv.indexOf(S.level) < 0) S.level = lv[0] || '';
+      renderEvents();
+    }).catch(function (e) { app.innerHTML = '<div class="errors">' + esc(errMsg(e)) + '</div>'; });
+  }
+
+  /* ขั้นที่ 2: เลือกระดับและรายการ */
+  function evStatus(e) {
+    if (e.confirmation) return { cls: 'ok', text: 'ยืนยันแล้ว' };
+    if (e.closed) return { cls: 'bad', text: 'ไม่ได้ยืนยัน' };
+    return { cls: 'wait', text: 'รอยืนยัน' };
+  }
+  function renderEvents() {
+    var v = S.view, levels = C.levelsOf(v.events);
+    var tabs = levels.length > 1 ? '<div class="tabs" role="tablist" style="grid-template-columns:repeat(' + levels.length + ',1fr)">' + levels.map(function (l) {
+      var evs = v.events.filter(function (e) { return e.level === l; });
+      var done = evs.filter(function (e) { return e.confirmation; }).length;
+      return '<button role="tab" data-l="' + esc(l) + '" aria-selected="' + (l === S.level) + '">' + esc(C.levelLabel(l)) +
+        '<small class="num">ยืนยัน ' + done + '/' + evs.length + '</small></button>';
+    }).join('') + '</div>' : '';
+    var evs = v.events.filter(function (e) { return e.level === S.level; });
+    var groups = {}, order = [];
+    evs.forEach(function (e) { var k = e.startDate || ''; if (!groups[k]) { groups[k] = []; order.push(k); } groups[k].push(e); });
+    var body = order.map(function (d) {
+      var g = groups[d];
+      return '<div class="day"><div class="day-h"><b>' + (d ? 'แข่ง' + thDate(d, true) : 'ยังไม่กำหนดวันแข่ง') + '</b><span>ปิดยืนยัน ' + thDateTime(g[0].deadline) + '</span></div>' +
+        g.map(function (e) {
+          var st = evStatus(e), n = e.entries.filter(function (x) { return x.status !== ST.OUT; }).length;
+          return '<button class="ev" data-e="' + esc(e.event) + '"><span class="name">' + esc(e.short) + '</span>' +
+            '<span class="pill ' + st.cls + '">' + st.text + '</span>' +
+            '<span class="meta num">' + n + ' คน' + (e.confirmation ? ' · โดย ' + esc(e.confirmation.by) + ' ' + esc(thDateTime(e.confirmation.at)) : '') + '</span></button>';
+        }).join('') + '</div>';
+    }).join('');
+    app.innerHTML = staffNote() + '<section class="card" style="display:grid;gap:14px">' +
+      '<div class="row between"><div><div class="step">ขั้นที่ 2 จาก 3</div><h2>' + esc(v.school) + '</h2></div>' +
+      '<button class="btn link" id="changeSchool">เปลี่ยนโรงเรียน</button></div>' + tabs +
+      (body || '<p class="muted">ไม่มีรายการ</p>') + '</section>';
+    document.getElementById('changeSchool').onclick = function () { S.view = null; renderSchools(); };
+    app.querySelectorAll('.tabs button').forEach(function (b) { b.onclick = function () { S.level = b.getAttribute('data-l'); renderEvents(); }; });
+    app.querySelectorAll('.ev').forEach(function (b) { b.onclick = function () { openEvent(b.getAttribute('data-e')); }; });
+    window.scrollTo(0, 0);
+  }
+  function staffNote() {
+    return S.staff ? '<div class="locked small">เข้าสู่ระบบเจ้าหน้าที่อยู่ แก้ไขได้แม้เลยเวลาปิดยืนยัน และการแก้ไขจะบันทึกชื่อบัญชีของคุณ</div>' : '';
+  }
+
+  /* ขั้นที่ 3: ยืนยัน/แก้ไขรายชื่อ */
+  function openEvent(name) {
+    S.ev = S.view.events.filter(function (x) { return x.event === name; })[0];
+    S.errors = []; S.draft = {};
+    S.ev.entries.forEach(function (x) { S.draft[x.id] = { prefix: x.prefix, first: x.first, last: x.last, withdrawn: x.status === ST.OUT }; });
+    renderEditor();
+  }
+  function canEdit() { return !S.ev.closed || !!S.staff; }
+  function slotInfo(x) {
+    var d = S.draft[x.id], k = pkey(d.first, d.last), out = [], max = S.view.max;
+    if (d.withdrawn) return { html: '<span class="chip">ถอนตัว ไม่นับรายการ</span>', bad: false };
+    var others = [], confirmedOthers = [];
+    S.view.events.forEach(function (e) {
+      if (e.event === S.ev.event) return;
+      e.entries.forEach(function (y) {
+        if (y.status === ST.OUT || pkey(y.first, y.last) !== k) return;
+        others.push(e.short); if (y.status === ST.OK) confirmedOthers.push(e.short);
+      });
+    });
+    var bad = max && confirmedOthers.length >= max, total = others.length + 1;
+    if (bad) out.push('<span class="chip bad">ยืนยันครบ ' + max + ' รายการแล้ว: ' + esc(confirmedOthers.join(', ')) + '</span>');
+    else out.push('<span class="chip' + (max && total > max ? ' warn' : '') + ' num">ลงแข่งรวม ' + total + ' รายการ' +
+      (others.length ? ' (อีก: ' + esc(others.join(', ')) + ')' : '') + (max && total > max ? ' · เกิน ' + max + ' ต้องถอนบางรายการ' : '') + '</span>');
+    if (d.prefix !== x.oPrefix || norm(d.first) !== norm(x.oFirst) || norm(d.last) !== norm(x.oLast))
+      out.push('<span class="chip edit">ชื่อเดิม: ' + esc(x.oPrefix + x.oFirst + ' ' + x.oLast) + '</span>');
+    return { html: out.join(''), bad: bad };
+  }
+  function renderEditor() {
+    var e = S.ev, ed = canEdit(), teams = {}, order = [], st = evStatus(e);
+    e.entries.forEach(function (x) { if (!teams[x.teamLabel]) { teams[x.teamLabel] = []; order.push(x.teamLabel); } teams[x.teamLabel].push(x); });
+    var head = e.confirmation ? '<div class="confirmed">ยืนยันแล้วเมื่อ ' + esc(thDateTime(e.confirmation.at)) + ' โดย ' + esc(e.confirmation.by) +
+      ' โทร ' + esc(e.confirmation.phone) + (ed && e.deadline ? '<br>แก้ไขและยืนยันซ้ำได้จนถึง ' + esc(thDateTime(e.deadline)) : '') + '</div>' : '';
+    if (!ed) head += '<div class="locked">ปิดรับยืนยันรายการนี้แล้วเมื่อ ' + esc(thDateTime(e.deadline)) + ' หากต้องแก้ไข ติดต่อเจ้าหน้าที่</div>';
+    else if (e.closed) head += '<div class="locked">เลยเวลาปิดยืนยันแล้ว กำลังแก้ไขในฐานะเจ้าหน้าที่</div>';
+    var dis = ed ? '' : ' disabled';
+    var slots = order.map(function (t) {
+      return '<div class="team"><div class="team-h">' + esc(t) + '</div>' + teams[t].map(function (x) {
+        var d = S.draft[x.id], pre = PREFIXES.indexOf(d.prefix) < 0 && d.prefix ? PREFIXES.concat([d.prefix]) : PREFIXES;
+        return '<div class="slot" data-id="' + x.id + '">' +
+          '<label class="f pre">คำนำหน้า<select data-f="prefix" id="p_' + x.id + '"' + dis + '>' +
+          pre.map(function (p) { return '<option' + (p === d.prefix ? ' selected' : '') + '>' + esc(p) + '</option>'; }).join('') + '</select></label>' +
+          '<label class="f fn">ชื่อ<input type="text" data-f="first" id="f_' + x.id + '" value="' + esc(d.first) + '"' + dis + '></label>' +
+          '<label class="f ln">นามสกุล<input type="text" data-f="last" id="l_' + x.id + '" value="' + esc(d.last) + '"' + dis + '></label>' +
+          '<label class="toggle tg"><input type="checkbox" data-f="withdrawn" id="w_' + x.id + '"' + (d.withdrawn ? ' checked' : '') + dis + '> ถอนตัว</label>' +
+          '<div class="info"></div></div>';
+      }).join('') + '</div>';
+    }).join('');
+    app.innerHTML = staffNote() + '<section class="card" style="display:grid;gap:14px">' +
+      '<div class="row between"><div><div class="step">ขั้นที่ 3 จาก 3 · ' + esc(S.view.school) + '</div><h2>' + esc(e.short) + '</h2>' +
+      '<div class="small muted">' + esc(e.event) + (e.startDate ? ' · แข่ง' + thDate(e.startDate, true) : '') + (e.startTime ? ' เริ่ม ' + esc(e.startTime) + ' น.' : '') + '</div></div>' +
+      '<span class="pill ' + st.cls + '">' + st.text + '</span></div>' +
+      '<button class="btn link" id="back" style="justify-self:start">‹ กลับไปรายการทั้งหมด</button>' + head +
+      '<div style="display:grid;gap:14px">' + slots + '</div>' +
+      (ed ? '<div class="sticky-bar"><div id="errBox"></div><div class="form2">' +
+        '<label class="f">ชื่อผู้ยืนยัน/แก้ไข (ผู้ควบคุมทีม)<input type="text" id="by" value="' + esc(C.store('ck_by') || '') + '" autocomplete="name"></label>' +
+        '<label class="f">เบอร์โทรศัพท์<input type="tel" id="phone" value="' + esc(C.store('ck_phone') || '') + '" inputmode="numeric" autocomplete="tel" placeholder="08xxxxxxxx"></label></div>' +
+        '<button class="btn primary" id="submit">' + (e.confirmation ? 'บันทึกและยืนยันอีกครั้ง' : 'ยืนยันรายชื่อ') + '</button></div>' : '') + '</section>';
+    document.getElementById('back').onclick = function () { S.ev = null; renderEvents(); };
+    app.querySelectorAll('.slot [data-f]').forEach(function (inp) {
+      inp.addEventListener(inp.type === 'checkbox' || inp.tagName === 'SELECT' ? 'change' : 'input', function () {
+        var id = inp.closest('.slot').getAttribute('data-id'), f = inp.getAttribute('data-f');
+        S.draft[id][f] = inp.type === 'checkbox' ? inp.checked : inp.value;
+        updateSlots();
+      });
+    });
+    if (ed) document.getElementById('submit').onclick = submit;
+    updateSlots(); renderErrors(); window.scrollTo(0, 0);
+  }
+  function updateSlots() {
+    var keys = {};
+    S.ev.entries.forEach(function (x) { var d = S.draft[x.id]; if (!d.withdrawn) { var k = pkey(d.first, d.last); keys[k] = (keys[k] || 0) + 1; } });
+    app.querySelectorAll('.slot').forEach(function (el) {
+      var x = S.ev.entries.filter(function (y) { return String(y.id) === el.getAttribute('data-id'); })[0];
+      var d = S.draft[x.id], info = slotInfo(x), dup = !d.withdrawn && keys[pkey(d.first, d.last)] > 1;
+      el.classList.toggle('out', d.withdrawn); el.classList.toggle('over', !!info.bad); el.classList.toggle('dup', dup);
+      el.querySelector('.info').innerHTML = info.html + (dup ? '<span class="chip bad">ชื่อซ้ำในรายการนี้</span>' : '');
+    });
+  }
+  function renderErrors() {
+    var box = document.getElementById('errBox'); if (!box) return;
+    box.innerHTML = S.errors.length ? '<div class="errors"><b>ยังบันทึกไม่ได้</b><ul>' + S.errors.map(function (m) { return '<li>' + esc(m) + '</li>'; }).join('') + '</ul></div>' : '';
+  }
+  function submit() {
+    var btn = document.getElementById('submit');
+    var by = document.getElementById('by').value.trim(), phone = document.getElementById('phone').value.trim();
+    C.store('ck_by', by); C.store('ck_phone', phone);
+    var payload = { school: S.view.school, event: S.ev.event, by: by, phone: phone,
+      items: S.ev.entries.map(function (x) { var d = S.draft[x.id]; return { id: x.id, prefix: d.prefix, first: d.first, last: d.last, withdrawn: d.withdrawn }; }) };
+    btn.disabled = true; btn.textContent = 'กำลังบันทึก…';
+    C.http('POST', base + '/submit', payload).then(function (res) {
+      if (!res.ok) { S.errors = res.errors; renderErrors(); btn.disabled = false; btn.textContent = 'ลองอีกครั้ง'; return; }
+      S.view = res.view; S.ev = null; S.errors = [];
+      renderEvents(); C.toast('ยืนยันรายชื่อแล้ว ' + res.conf.count + ' คน');
+    }).catch(function (e) { S.errors = [errMsg(e)]; renderErrors(); btn.disabled = false; btn.textContent = 'ลองอีกครั้ง'; });
+  }
+
+  C.http('GET', base + '/info').then(function (d) {
+    S.comp = d.comp; S.schools = d.schools; S.events = d.events; S.staff = d.staff;
+    renderHeader(); renderDeadlines(); setInterval(renderDeadlines, 60000);
+    renderSchools();
+  }).catch(function (e) { app.innerHTML = '<div class="errors">โหลดข้อมูลไม่สำเร็จ: ' + esc(errMsg(e)) + '</div>'; });
+})();
+</script>
+</body>
+</html>
