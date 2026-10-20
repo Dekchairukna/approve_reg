@@ -12,7 +12,7 @@
 <header class="band">
   <div class="wrap">
     <div class="band-top">
-      <div class="brand" id="brand"><div class="logo-ph"></div><div><div class="games">&nbsp;</div><h1>ระบบยืนยันรายชื่อนักกีฬา</h1></div></div>
+      <div class="brand" id="brand"><div class="logo-ph"></div><div><div class="games">&nbsp;</div><h1>ยืนยันรายชื่อนักกีฬา</h1></div></div>
       <div class="staffbar" id="staffbar"></div>
     </div>
     <div class="deadlines" id="deadlines"></div>
@@ -26,7 +26,6 @@
 (function () {
   var esc = C.esc, norm = C.norm, thDate = C.thDate, thDateTime = C.thDateTime;
   var ST = { PENDING: 'รอยืนยัน', OK: 'ยืนยัน', OUT: 'ถอนตัว' };
-  var PREFIXES = ['ด.ช.', 'ด.ญ.', 'นาย', 'น.ส.', 'นาง'];
   var slug = decodeURIComponent(location.pathname.split('/')[2] || '');
   var base = '/api/c/' + encodeURIComponent(slug);
   var S = { comp: null, schools: [], events: [], levels: [], staff: null, view: null, level: '', ev: null, draft: null, errors: [] };
@@ -126,13 +125,12 @@
   function openEvent(name) {
     S.ev = S.view.events.filter(function (x) { return x.event === name; })[0];
     S.errors = []; S.draft = {};
-    S.ev.entries.forEach(function (x) { S.draft[x.id] = { prefix: x.prefix, first: x.first, last: x.last, withdrawn: x.status === ST.OUT }; });
+    S.ev.entries.forEach(function (x) { S.draft[x.id] = { prefix: x.prefix, first: x.first, last: x.last }; });
     renderEditor();
   }
   function canEdit() { return !S.ev.closed || !!S.staff; }
   function slotInfo(x) {
     var d = S.draft[x.id], k = pkey(d.first, d.last), out = [], max = S.view.max;
-    if (d.withdrawn) return { html: '<span class="chip">ถอนตัว ไม่นับรายการ</span>', bad: false };
     var others = [], confirmedOthers = [];
     S.view.events.forEach(function (e) {
       if (e.event === S.ev.event) return;
@@ -144,7 +142,7 @@
     var bad = max && confirmedOthers.length >= max, total = others.length + 1;
     if (bad) out.push('<span class="chip bad">ยืนยันครบ ' + max + ' รายการแล้ว: ' + esc(confirmedOthers.join(', ')) + '</span>');
     else out.push('<span class="chip' + (max && total > max ? ' warn' : '') + ' num">ลงแข่งรวม ' + total + ' รายการ' +
-      (others.length ? ' (อีก: ' + esc(others.join(', ')) + ')' : '') + (max && total > max ? ' · เกิน ' + max + ' ต้องถอนบางรายการ' : '') + '</span>');
+      (others.length ? ' (อีก: ' + esc(others.join(', ')) + ')' : '') + (max && total > max ? ' · เกิน ' + max + ' รายการ เปลี่ยนเป็นคนอื่นในบางรายการ' : '') + '</span>');
     if (d.prefix !== x.oPrefix || norm(d.first) !== norm(x.oFirst) || norm(d.last) !== norm(x.oLast))
       out.push('<span class="chip edit">ชื่อเดิม: ' + esc(x.oPrefix + x.oFirst + ' ' + x.oLast) + '</span>');
     return { html: out.join(''), bad: bad };
@@ -159,13 +157,12 @@
     var dis = ed ? '' : ' disabled';
     var slots = order.map(function (t) {
       return '<div class="team"><div class="team-h">' + esc(t) + '</div>' + teams[t].map(function (x) {
-        var d = S.draft[x.id], pre = PREFIXES.indexOf(d.prefix) < 0 && d.prefix ? PREFIXES.concat([d.prefix]) : PREFIXES;
-        return '<div class="slot" data-id="' + x.id + '">' +
-          '<label class="f pre">คำนำหน้า<select data-f="prefix" id="p_' + x.id + '"' + dis + '>' +
-          pre.map(function (p) { return '<option' + (p === d.prefix ? ' selected' : '') + '>' + esc(p) + '</option>'; }).join('') + '</select></label>' +
-          '<label class="f fn">ชื่อ<input type="text" data-f="first" id="f_' + x.id + '" value="' + esc(d.first) + '"' + dis + '></label>' +
-          '<label class="f ln">นามสกุล<input type="text" data-f="last" id="l_' + x.id + '" value="' + esc(d.last) + '"' + dis + '></label>' +
-          '<label class="toggle tg"><input type="checkbox" data-f="withdrawn" id="w_' + x.id + '"' + (d.withdrawn ? ' checked' : '') + dis + '> ถอนตัว</label>' +
+        var d = S.draft[x.id], cur = pkey(d.first, d.last);
+        return '<div class="slot pick" data-id="' + x.id + '">' +
+          '<label class="f">นักกีฬา<select class="who" id="w_' + x.id + '"' + dis + '>' +
+          e.pool.map(function (p, i) {
+            return '<option value="' + i + '"' + (pkey(p.first, p.last) === cur ? ' selected' : '') + '>' + esc(p.prefix + p.first + ' ' + p.last) + '</option>';
+          }).join('') + '</select></label>' +
           '<div class="info"></div></div>';
       }).join('') + '</div>';
     }).join('');
@@ -180,10 +177,10 @@
         '<label class="f">เบอร์โทรศัพท์<input type="tel" id="phone" value="' + esc(C.store('ck_phone') || '') + '" inputmode="numeric" autocomplete="tel" placeholder="08xxxxxxxx"></label></div>' +
         '<button class="btn primary" id="submit">' + (e.confirmation ? 'บันทึกและยืนยันอีกครั้ง' : 'ยืนยันรายชื่อ') + '</button></div>' : '') + '</section>';
     document.getElementById('back').onclick = function () { S.ev = null; renderEvents(); };
-    app.querySelectorAll('.slot [data-f]').forEach(function (inp) {
-      inp.addEventListener(inp.type === 'checkbox' || inp.tagName === 'SELECT' ? 'change' : 'input', function () {
-        var id = inp.closest('.slot').getAttribute('data-id'), f = inp.getAttribute('data-f');
-        S.draft[id][f] = inp.type === 'checkbox' ? inp.checked : inp.value;
+    app.querySelectorAll('.slot select.who').forEach(function (sel) {
+      sel.addEventListener('change', function () {
+        var id = sel.closest('.slot').getAttribute('data-id'), p = S.ev.pool[+sel.value];
+        S.draft[id] = { prefix: p.prefix, first: p.first, last: p.last };
         updateSlots();
       });
     });
@@ -192,11 +189,11 @@
   }
   function updateSlots() {
     var keys = {};
-    S.ev.entries.forEach(function (x) { var d = S.draft[x.id]; if (!d.withdrawn) { var k = pkey(d.first, d.last); keys[k] = (keys[k] || 0) + 1; } });
+    S.ev.entries.forEach(function (x) { var d = S.draft[x.id], k = pkey(d.first, d.last); keys[k] = (keys[k] || 0) + 1; });
     app.querySelectorAll('.slot').forEach(function (el) {
       var x = S.ev.entries.filter(function (y) { return String(y.id) === el.getAttribute('data-id'); })[0];
-      var d = S.draft[x.id], info = slotInfo(x), dup = !d.withdrawn && keys[pkey(d.first, d.last)] > 1;
-      el.classList.toggle('out', d.withdrawn); el.classList.toggle('over', !!info.bad); el.classList.toggle('dup', dup);
+      var d = S.draft[x.id], info = slotInfo(x), dup = keys[pkey(d.first, d.last)] > 1;
+      el.classList.toggle('over', !!info.bad); el.classList.toggle('dup', dup);
       el.querySelector('.info').innerHTML = info.html + (dup ? '<span class="chip bad">ชื่อซ้ำในรายการนี้</span>' : '');
     });
   }
@@ -209,7 +206,7 @@
     var by = document.getElementById('by').value.trim(), phone = document.getElementById('phone').value.trim();
     C.store('ck_by', by); C.store('ck_phone', phone);
     var payload = { school: S.view.school, event: S.ev.event, by: by, phone: phone,
-      items: S.ev.entries.map(function (x) { var d = S.draft[x.id]; return { id: x.id, prefix: d.prefix, first: d.first, last: d.last, withdrawn: d.withdrawn }; }) };
+      items: S.ev.entries.map(function (x) { var d = S.draft[x.id]; return { id: x.id, prefix: d.prefix, first: d.first, last: d.last }; }) };
     btn.disabled = true; btn.textContent = 'กำลังบันทึก…';
     C.http('POST', base + '/submit', payload).then(function (res) {
       if (!res.ok) { S.errors = res.errors; renderErrors(); btn.disabled = false; btn.textContent = 'ลองอีกครั้ง'; return; }

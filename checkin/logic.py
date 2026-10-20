@@ -18,7 +18,8 @@ def stamp():
 
 
 def norm(s):
-    return re.sub(r'\s+', '', str(s or ''))
+    # ตัดช่องว่างและอักขระล่องหน (zero-width) ที่ติดมากับการคัดลอกชื่อ
+    return re.sub(r'[\s\u200b\u200c\u200d\ufeff]+', '', str(s or ''))
 
 
 def clean(s):
@@ -67,6 +68,45 @@ def team_sort(e):
     return (int(t) if t.isdigit() else 99999, e['id'])
 
 
+MALE_PREFIXES = ('ด.ช.', 'นาย')
+FEMALE_PREFIXES = ('ด.ญ.', 'น.ส.', 'นาง', 'นางสาว')
+
+
+def gender_of_prefix(prefix):
+    p = norm(prefix)
+    if p in MALE_PREFIXES:
+        return 'M'
+    if p in FEMALE_PREFIXES:
+        return 'F'
+    return ''
+
+
+def gender_of_event(name):
+    if 'ผสม' in name:
+        return ''
+    if 'หญิง' in name:
+        return 'F'
+    if 'ชาย' in name:
+        return 'M'
+    return ''
+
+
+def roster(entries, ev):
+    """นักกีฬาที่โรงเรียนสมัครไว้ในรุ่นเดียวกับรายการนี้ (ระดับชั้นเดียวกัน และเพศตรงกับรายการ)
+    entries ต้องเป็นของโรงเรียนเดียว คืน {key: (คำนำหน้า, ชื่อ, นามสกุล)}"""
+    want = gender_of_event(ev['event'])
+    out = {}
+    for e in entries:
+        if e['level'] != ev['level']:
+            continue
+        for p, f, l in ((e['oPrefix'], e['oFirst'], e['oLast']), (e['prefix'], e['first'], e['last'])):
+            g = gender_of_prefix(p)
+            if want and g and g != want:
+                continue
+            out.setdefault(pkey(e['school'], f, l), (p, f, l))
+    return out
+
+
 def school_view(entries, events, confs, school, now, max_events):
     cm = {(c['school'], c['event']): c for c in confs}
     by_event = {}
@@ -78,7 +118,10 @@ def school_view(entries, events, confs, school, now, max_events):
         rows = by_event.get(ev['event'])
         if not rows:
             continue
+        pool = roster([e for e in entries if e['school'] == school], ev)
         out.append(dict(
+            pool=sorted(({'prefix': p, 'first': f, 'last': l} for p, f, l in pool.values()),
+                        key=lambda x: (x['first'], x['last'])),
             event=ev['event'], short=ev['short'], level=ev['level'], category=ev['category'],
             startDate=ev['startDate'], startTime=ev['startTime'], deadline=ev['deadline'],
             closed=is_closed(ev, now), confirmation=cm.get((school, ev['event'])),
@@ -115,19 +158,24 @@ def apply_submit(entries, events, payload, now, staff, max_events):
     except (KeyError, TypeError, ValueError):
         return dict(ok=False, errors=['ข้อมูลไม่ถูกต้อง กรุณาโหลดหน้าใหม่'])
     seen, changes, logs, ts = set(), [], [], stamp()
+    pool = roster(mine and [e for e in entries if e['school'] == school] or [], ev)
 
     for e in mine:
         it = items.get(e['id'])
         if it is None:
             errors.append('ข้อมูลไม่ครบ กรุณาโหลดหน้าใหม่')
             continue
-        out = bool(it.get('withdrawn'))
+        out = False   # ไม่มีการถอนตัวแล้ว: เปลี่ยนตัวได้เฉพาะคนที่สมัครไว้ในรุ่นเดียวกัน
         p, f, l = clean(it.get('prefix'))[:20], clean(it.get('first'))[:80], clean(it.get('last'))[:80]
         if not out:
             if not f or not l:
                 errors.append(f"กรุณากรอกชื่อ-นามสกุลให้ครบ ({team_label(e['team'], ev['category'])})")
                 continue
             k = pkey(school, f, l)
+            if k not in pool:
+                errors.append(f'{p}{f} {l} ไม่อยู่ในรายชื่อที่โรงเรียนสมัครไว้ในรุ่นนี้ เลือกจากรายชื่อในช่องเท่านั้น')
+                continue
+            p, f, l = pool[k]
             if k in seen:
                 errors.append(f'{p}{f} {l} มีชื่อซ้ำในรายการนี้')
             seen.add(k)

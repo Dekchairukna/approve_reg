@@ -21,6 +21,8 @@ ROWS = [
     ['เปตอง : ประถมศึกษา ทีม 3 คน ชาย', 'โรงเรียนเอ', 'ด.ช.', 'หนึ่ง', 'ทดสอบ', 'ประถมศึกษา', 999],
     ['เปตอง : ประถมศึกษา ทีม 3 คน ชาย', 'โรงเรียนเอ', 'ด.ช.', 'สาม', 'ทดสอบ', 'ประถมศึกษา', 999],
     ['เปตอง : ประถมศึกษา ทีม 3 คน ชาย', 'โรงเรียนบี', 'ด.ช.', 'สี่', 'ทดสอบ', 'ประถมศึกษา', 1],
+    ['เปตอง : เดี่ยว ประถมศึกษา บุคคล หญิง', 'โรงเรียนเอ', 'ด.ญ.', 'ใจดี', 'ทดสอบ', 'ประถมศึกษา', 999],
+    ['เปตอง : เดี่ยว ประถมศึกษา บุคคล ชาย', 'โรงเรียนเอ', 'ด.ช.', 'ขยัน', 'ทดสอบ', 'ประถมศึกษา', 999],
 ]
 
 
@@ -58,14 +60,16 @@ def setup_comp(c):
     r = c.post('/api/admin/competitions', headers=H, content_type='multipart/form-data',
                data={'name': 'งานทดสอบ', 'sport': 'เปตอง', 'slug': 'test', 'max_events': '3', 'file': (xlsx(), 'a.xlsx')})
     assert r.status_code == 200, r.json
-    assert r.json['imported'] == {'entries': 7, 'events': 4, 'schools': 2}
+    assert r.json['imported'] == {'entries': 9, 'events': 5, 'schools': 2}
     return r.json['id']
 
 
-def submit(c, event_name, school='โรงเรียนเอ', withdraw=()):
+def submit(c, event_name, school='โรงเรียนเอ', swap=None):
+    """swap = {'ชื่อเดิม': 'ชื่อใหม่'} เปลี่ยนตัวนักกีฬา"""
+    swap = swap or {}
     v = c.post('/api/c/test/school', json={'school': school}, headers=H).json
     ev = next(e for e in v['events'] if e['event'] == event_name)
-    items = [dict(id=x['id'], prefix=x['prefix'], first=x['first'], last=x['last'], withdrawn=x['first'] in withdraw) for x in ev['entries']]
+    items = [dict(id=x['id'], prefix=x['prefix'], first=swap.get(x['first'], x['first']), last=x['last']) for x in ev['entries']]
     return c.post('/api/c/test/submit', headers=H, json={'school': school, 'event': event_name, 'by': 'ครู', 'phone': '0812345678', 'items': items}).json
 
 
@@ -78,14 +82,26 @@ def test_setup_only_once(client):
     assert client.post('/api/auth/setup', json={'username': 'x2', 'password': 'password123'}, headers=H).status_code == 403
 
 
-def test_max_three_events_and_withdraw(client):
+def test_max_three_events_and_swap(client):
     setup_comp(client)
     client.post('/api/auth/logout', headers=H)          # โรงเรียนไม่ต้องล็อกอิน
     for name in ['เปตอง : เดี่ยว ประถมศึกษา บุคคล ชาย', 'เปตอง : ประถมศึกษา Shooting 1 คน ชาย', 'เปตอง : ประถมศึกษา คู่ ชาย']:
         assert submit(client, name)['ok']
     r = submit(client, 'เปตอง : ประถมศึกษา ทีม 3 คน ชาย')
     assert not r['ok'] and 'ยืนยันได้สูงสุด 3 รายการ' in r['errors'][0]
-    assert submit(client, 'เปตอง : ประถมศึกษา ทีม 3 คน ชาย', withdraw=('หนึ่ง',))['ok']
+    assert submit(client, 'เปตอง : ประถมศึกษา ทีม 3 คน ชาย', swap={'หนึ่ง': 'สอง'})['ok']   # เปลี่ยนตัว
+
+
+def test_roster_dropdown_and_validation(client):
+    setup_comp(client)
+    v = client.post('/api/c/test/school', json={'school': 'โรงเรียนเอ'}, headers=H).json
+    team = next(e for e in v['events'] if e['short'] == 'ทีม 3 คน ชาย')
+    assert sorted(p['first'] for p in team['pool']) == ['ขยัน', 'สอง', 'สาม', 'หนึ่ง']  # ชายประถมของโรงเรียนเอ
+    assert all(p['first'] != 'ใจดี' for p in team['pool'])                            # หญิงไม่อยู่ในรุ่นชาย
+    r = submit(client, 'เปตอง : ประถมศึกษา ทีม 3 คน ชาย', swap={'หนึ่ง': 'คนนอก'})
+    assert not r['ok'] and 'ไม่อยู่ในรายชื่อ' in r['errors'][0]
+    r = submit(client, 'เปตอง : ประถมศึกษา ทีม 3 คน ชาย', swap={'หนึ่ง': 'สาม'})
+    assert not r['ok'] and 'ชื่อซ้ำ' in r['errors'][0]
 
 
 def test_labels_for_unspecified_team(client):
@@ -125,7 +141,7 @@ def test_print_only_confirmed(client):
     submit(client, 'เปตอง : ประถมศึกษา คู่ ชาย')
     d = client.post(f'/api/admin/competitions/{cid}/print', headers=H, json={}).json
     assert len(d['pages']) == 1 and d['pages'][0]['blocks'][0]['rows'][0]['name'] == 'ด.ช.หนึ่ง ทดสอบ'
-    assert len(d['skipped']) == 4
+    assert len(d['skipped']) == 5
 
 
 def test_delete_competition_and_user(client):
@@ -150,7 +166,7 @@ def test_backup_and_restore_on_fresh_install(client, tmp_path):
     from checkin import create_app
     fresh = create_app(str(tmp_path / 'fresh')).test_client()
     r = fresh.post('/api/auth/restore', headers=H, content_type='multipart/form-data', data={'file': (io.BytesIO(data), 'checkin.db')})
-    assert r.status_code == 200 and r.json['counts']['entries'] == 7 and r.json['counts']['confs'] == 1
+    assert r.status_code == 200 and r.json['counts']['entries'] == 9 and r.json['counts']['confs'] == 1
     assert fresh.post('/api/auth/login', headers=H, json={'username': 'admin', 'password': 'password123'}).status_code == 200
     assert fresh.get(f'/api/admin/competitions/{cid}/overview').json['totals']['pairsDone'] == 1
     # มีผู้ใช้แล้ว ห้ามกู้คืนแบบไม่ล็อกอิน

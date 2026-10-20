@@ -100,6 +100,8 @@ label.f { display: grid; gap: 4px; font-size: 13px; color: var(--muted); min-wid
 .slot.out { background: var(--surface-2) }
 .slot.out input, .slot.out select { text-decoration: line-through }
 .slot.dup, .slot.over { border-color: var(--bad); background: var(--bad-soft) }
+.slot.pick { grid-template-columns: 1fr }
+@media (max-width: 560px) { .sticky-bar { position: static } }
 .slot .info { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted) }
 .chip { padding: 1px 8px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--line) }
 .chip.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent }

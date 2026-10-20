@@ -17,7 +17,7 @@
     });
   }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
-  function norm(s) { return String(s == null ? '' : s).replace(/\s+/g, ''); }
+  function norm(s) { return String(s == null ? '' : s).replace(/[\s\u200b\u200c\u200d\ufeff]+/g, ''); }
   function toMs(s) {
     var m = String(s || '').match(/(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{1,2}):(\d{2}))?/);
     return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], (+m[4] || 0) - 7, +m[5] || 0) : NaN;
