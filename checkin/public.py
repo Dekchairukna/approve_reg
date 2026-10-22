@@ -1,5 +1,8 @@
 """หน้าสาธารณะ: โรงเรียนยืนยันรายชื่อโดยไม่ต้องล็อกอิน"""
+import os
 import threading
+
+from markupsafe import escape
 
 from flask import Blueprint, Response, abort, current_app, g, jsonify, request, send_from_directory
 
@@ -21,9 +24,21 @@ def home():
 
 @bp.get('/c/<slug>')
 def comp_page(slug):
-    if not store.comp_by_slug(slug, include_inactive=bool(g.user)):
+    c = store.comp_by_slug(slug, include_inactive=bool(g.user))
+    if not c:
         abort(404)
-    return static_page('index.html')
+    # ใส่ชื่องานและโลโก้ลงในหน้า เพื่อให้ตัวอย่างลิงก์ใน LINE/Facebook แสดงถูกงาน
+    with open(os.path.join(current_app.static_folder, 'index.html'), encoding='utf-8') as f:
+        page = f.read()
+    title = 'ยืนยันรายชื่อนักกีฬา' + (c['sport'] or '')
+    desc = c['name'] + ' · โรงเรียนเลือกยืนยันหรือเปลี่ยนตัวนักกีฬาก่อนเวลาปิด'
+    og = (f'<meta name="description" content="{escape(desc)}">\n'
+          f'<meta property="og:title" content="{escape(title)}">\n'
+          f'<meta property="og:description" content="{escape(desc)}">\n<meta property="og:type" content="website">')
+    if c['logo']:
+        og += f'\n<meta property="og:image" content="{escape(request.url_root.rstrip("/").replace("http://", "https://") if request.headers.get("X-Forwarded-Proto") == "https" else request.url_root.rstrip("/"))}/logo/{c["id"]}?v={escape(c["logo"])}">'
+    page = page.replace('<title>ยืนยันรายชื่อนักกีฬา</title>', f'<title>{escape(title)}</title>', 1).replace('<!--og-->', og, 1)
+    return Response(page, mimetype='text/html')
 
 
 @bp.get('/logo/<int:cid>')
