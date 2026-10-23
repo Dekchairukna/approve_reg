@@ -213,12 +213,13 @@
         }).join('') + '</tbody></table></div>' +
         '<h3>รายโรงเรียน</h3><div class="tbl-wrap"><table class="t"><thead><tr><th>โรงเรียน</th><th>ยืนยัน</th><th>นักกีฬา</th><th>อัปเดตล่าสุด</th></tr></thead><tbody>' +
         o.schools.map(function (s) {
-          return '<tr><td style="min-width:240px">' + esc(s.school) + '<div class="evgrid">' + s.events.map(function (e) {
-            return '<span class="' + (e.done ? 'y' : 'n') + '" title="' + esc(e.event + (e.done ? ' · ' + e.by + ' ' + e.phone : '')) + '">' + esc(C.levelLabel(e.level) + ' ' + e.short) + '</span>';
+          var base = '/c/' + encodeURIComponent(c.slug) + '#s=' + encodeURIComponent(s.school);
+          return '<tr><td style="min-width:240px"><a href="' + base + '" target="_blank" rel="noopener">' + esc(s.school) + '</a><div class="evgrid">' + s.events.map(function (e) {
+            return '<a class="' + (e.done ? 'y' : 'n') + '" href="' + base + '&e=' + encodeURIComponent(e.event) + '" target="_blank" rel="noopener" title="' + esc('กดเพื่อแก้ไข · ' + e.event + (e.done ? ' · ' + e.by + ' ' + e.phone : '')) + '">' + esc(C.levelLabel(e.level) + ' ' + e.short) + '</a>';
           }).join('') + '</div></td><td class="num">' + s.done + '/' + s.total + '<div class="bar"><i style="width:' + pct(s.done, s.total) + '%"></i></div></td>' +
             '<td class="num">' + s.athletes + '</td><td class="small">' + esc(s.last ? thDateTime(s.last) : '–') + '</td></tr>';
         }).join('') + '</tbody></table></div>' +
-        '<p class="hint" style="margin:0">แก้รายชื่อแทนโรงเรียน (รวมถึงหลังปิดยืนยัน): กด "เปิด" ลิงก์สำหรับโรงเรียนด้านบน ระบบจะจำว่าคุณเป็นเจ้าหน้าที่</p></div>';
+        '<p class="hint" style="margin:0">แก้รายชื่อแทนโรงเรียน (แก้ได้แม้เลยเวลาปิด): กดชื่อโรงเรียน หรือกดชื่อรายการ ระบบจะเปิดหน้าแก้ไขในแท็บใหม่</p></div>';
       document.getElementById('refresh').onclick = tabOverview;
     }).catch(fail);
   }

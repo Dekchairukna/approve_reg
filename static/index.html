@@ -256,7 +256,15 @@
   C.http('GET', base + '/info').then(function (d) {
     S.comp = d.comp; S.schools = d.schools; S.events = d.events; S.staff = d.staff;
     renderHeader(); renderDeadlines(); setInterval(renderDeadlines, 60000);
-    renderSchools();
+    // ลิงก์จากหลังบ้าน: #s=โรงเรียน&e=รายการ เปิดตรงไปที่หน้าแก้ไข
+    var h = {};
+    location.hash.replace(/^#/, '').split('&').forEach(function (kv) { var i = kv.indexOf('='); if (i > 0) h[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1)); });
+    if (h.s && S.schools.indexOf(h.s) >= 0) {
+      openSchool(h.s).then(function () {
+        var ev = h.e && S.view && S.view.events.filter(function (x) { return x.event === h.e; })[0];
+        if (ev) { S.level = ev.level; openEvent(ev.event); }
+      });
+    } else renderSchools();
   }).catch(function (e) { app.innerHTML = '<div class="errors">โหลดข้อมูลไม่สำเร็จ: ' + esc(errMsg(e)) + '</div>'; });
 })();
 </script>
