@@ -189,3 +189,16 @@ def test_choose_team_number(client):
     assert not r['ok']
     d = client.post(f'/api/admin/competitions/{cid}/print', headers=H, json={}).json
     assert [row['teamLabel'] for row in d['pages'][0]['blocks'][0]['rows']] == ['ทีมที่ 1', 'ทีมที่ 2']
+
+
+def test_not_sending_athlete(client):
+    cid = setup_comp(client)
+    v = client.post('/api/c/test/school', json={'school': 'โรงเรียนเอ'}, headers=H).json
+    ev = next(e for e in v['events'] if e['short'] == 'คู่ชาย')
+    items = [dict(id=x['id'], team='1', prefix=x['prefix'], first=x['first'], last=x['last'], withdrawn=(i == 1))
+             for i, x in enumerate(ev['entries'])]
+    r = client.post('/api/c/test/submit', headers=H, json={'school': 'โรงเรียนเอ', 'event': ev['event'], 'by': 'ครู', 'phone': '0812345678', 'items': items}).json
+    assert r['ok'] and r['conf']['count'] == 1
+    d = client.post(f'/api/admin/competitions/{cid}/print', headers=H, json={}).json
+    assert len(d['pages'][0]['blocks'][0]['rows']) == 1
+    assert client.get(f'/api/admin/competitions/{cid}/overview').json['totals']['entriesWithdrawn'] == 1

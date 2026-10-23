@@ -204,7 +204,7 @@
         '<div class="tiles"><div class="tile"><b>' + t.athletesConfirmed + '</b><span>นักกีฬายืนยันแล้ว (คน)</span></div>' +
         '<div class="tile"><b>' + t.pairsDone + '<small class="muted" style="font-size:15px"> / ' + t.pairsTotal + '</small></b><span>รายการที่โรงเรียนยืนยันแล้ว</span></div>' +
         '<div class="tile"><b>' + t.entriesConfirmed + '</b><span>สิทธิ์ลงแข่งที่ยืนยัน (คน-รายการ)</span></div>' +
-        '<div class="tile"><b>' + t.entriesWithdrawn + '</b><span>ถอนตัว</span></div></div>' +
+        '<div class="tile"><b>' + t.entriesWithdrawn + '</b><span>ไม่ส่ง (คน-รายการ)</span></div></div>' +
         (o.over.length ? '<div class="errors"><b>ยืนยันเกิน ' + c.max + ' รายการ</b><ul>' + o.over.map(function (p) { return '<li>' + esc(p.name + ' · ' + p.school + ' (' + p.events.join(', ') + ')') + '</li>'; }).join('') + '</ul></div>' : '') +
         '<h3>ตามวันแข่งขัน</h3><div class="tbl-wrap"><table class="t"><thead><tr><th>วันแข่ง</th><th>ประเภท</th><th>ปิดยืนยัน</th><th>ยืนยันแล้ว</th><th style="width:28%"></th></tr></thead><tbody>' +
         o.categories.map(function (k) {
@@ -227,7 +227,7 @@
   function tabPrint() {
     var dayOpts = C.days(A.events).map(function (d) { return '<option value="' + esc(d.startDate || '') + '">' + thDate(d.startDate) + ' · ' + esc(d.cats.join(', ')) + '</option>'; }).join('');
     var levels = C.levelsOf(A.events);
-    tabEl().innerHTML = '<div style="display:grid;gap:12px"><p class="small muted" style="margin:0">พิมพ์เฉพาะรายชื่อที่ยืนยันแล้ว (ไม่รวมผู้ถอนตัว) แยกหน้าตามโรงเรียน</p>' +
+    tabEl().innerHTML = '<div style="display:grid;gap:12px"><p class="small muted" style="margin:0">พิมพ์เฉพาะรายชื่อที่ยืนยันแล้ว (ไม่รวมช่องที่เลือก "ไม่ส่ง") แยกหน้าตามโรงเรียน</p>' +
       '<div class="print-controls"><label class="f">วันแข่งขัน<select id="pDay">' + dayOpts + '</select></label>' +
       '<label class="f">โรงเรียน<select id="pSchool"><option value="">ทุกโรงเรียน</option>' + A.schools.map(function (s) { return '<option>' + esc(s) + '</option>'; }).join('') + '</select></label>' +
       '<label class="f">ระดับ<select id="pLevel"><option value="">ทุกระดับ</option>' + levels.map(function (l) { return '<option value="' + esc(l) + '">' + esc(C.levelLabel(l)) + '</option>'; }).join('') + '</select></label>' +
@@ -254,7 +254,7 @@
             '<b>วันแข่งขัน</b><span>' + thDate(b.startDate, true) + (b.startTime ? ' เริ่ม ' + esc(b.startTime) + ' น.' : '') + '</span></div>' +
             '<table><thead><tr><th class="c">ที่</th><th style="width:28mm">คู่/ทีม</th><th>ชื่อ - นามสกุล</th><th class="sig">ลงชื่อนักกีฬา</th></tr></thead><tbody>' +
             (b.rows.length ? b.rows.map(function (r, j) { return '<tr><td class="c">' + (j + 1) + '</td><td>' + esc(r.teamLabel) + '</td><td>' + esc(r.name) + '</td><td class="sig"></td></tr>'; }).join('')
-              : '<tr><td colspan="4" style="text-align:center">ถอนตัวทั้งรายการ</td></tr>') + '</tbody></table>' +
+              : '<tr><td colspan="4" style="text-align:center">ไม่ส่งแข่งรายการนี้</td></tr>') + '</tbody></table>' +
             '<div class="foot">ยืนยันรายชื่อในระบบโดย ' + esc(b.conf.by) + ' โทร ' + esc(b.conf.phone) + ' เมื่อ ' + esc(thDateTime(b.conf.at)) + '</div>' +
             '<div class="signs"><div><span>ลงชื่อ ...................................................</span><span>ผู้ควบคุมทีม</span></div>' +
             '<div><span>ลงชื่อ ...................................................</span><span>เจ้าหน้าที่รับรายงานตัว · เวลา ........ น.</span></div></div></div>';

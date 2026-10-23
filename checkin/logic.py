@@ -165,7 +165,7 @@ def apply_submit(entries, events, payload, now, staff, max_events):
         if it is None:
             errors.append('ข้อมูลไม่ครบ กรุณาโหลดหน้าใหม่')
             continue
-        out = False   # ไม่มีการถอนตัวแล้ว: เปลี่ยนตัวได้เฉพาะคนที่สมัครไว้ในรุ่นเดียวกัน
+        out = bool(it.get('withdrawn'))   # เลือก "ไม่ส่ง" ในดรอปดาว
         p, f, l = clean(it.get('prefix'))[:20], clean(it.get('first'))[:80], clean(it.get('last'))[:80]
         if not out:
             if not f or not l:
@@ -196,7 +196,7 @@ def apply_submit(entries, events, payload, now, staff, max_events):
         if name_changed or team_changed or nu['status'] != e['status']:
             tb, ta = team_label(e['team'], ev['category']), team_label(team, ev['category'])
             logs.append(dict(at=ts, school=school, event=e['event'], entry_id=e['id'],
-                             action='ถอนตัว' if out else ('แก้ไขชื่อ' if name_changed else ('ระบุทีม' if team_changed else 'ยืนยัน')),
+                             action='ไม่ส่ง' if out else ('แก้ไขชื่อ' if name_changed else ('ระบุทีม' if team_changed else 'ยืนยัน')),
                              before=f"{e['prefix']}{e['first']} {e['last']} ({tb}) [{e['status']}]",
                              after=f"{nu['prefix']}{nu['first']} {nu['last']} ({ta}) [{nu['status']}]",
                              by=nu['by'], phone=phone, user=staff or ''))
