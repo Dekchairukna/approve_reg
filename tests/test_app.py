@@ -225,3 +225,23 @@ def test_team_slots_add_new_athlete(client):
     assert not r['ok'] and 'ไม่เกิน 3 คน' in ' '.join(r['errors'])
     d = client.post(f'/api/admin/competitions/{cid}/print', headers=H, json={}).json
     assert len(d['pages'][0]['blocks'][0]['rows']) == 3
+
+
+def test_checkin_by_staff(client):
+    cid = setup_comp(client)
+    submit(client, 'เปตอง : ประถมศึกษา คู่ ชาย')
+    url = f'/api/admin/competitions/{cid}/checkin'
+    submit(client, 'เปตอง : เดี่ยว ประถมศึกษา บุคคล ชาย')
+    q = '?event=เปตอง : ประถมศึกษา คู่ ชาย&event=เปตอง : เดี่ยว ประถมศึกษา บุคคล ชาย'
+    d = client.get(url + q).json
+    assert len(d['rows']) == 4 and not any(r['checkinAt'] for r in d['rows'])
+    nueng = [r['id'] for r in d['rows'] if r['name'] == 'ด.ช.หนึ่ง ทดสอบ']
+    assert len(nueng) == 2                                   # คนเดียวลง 2 รายการที่เลือก
+    r = client.post(url, headers=H, json={'ids': nueng, 'present': True}).json
+    assert r['ok'] and len(r['ids']) == 2 and r['checkinAt']
+    assert sum(1 for x in client.get(url + q).json['rows'] if x['checkinAt']) == 2
+    client.post(url, headers=H, json={'ids': nueng, 'present': False})
+    assert not any(x['checkinAt'] for x in client.get(url + q).json['rows'])
+    rid = nueng[0]
+    client.post('/api/auth/logout', headers=H)
+    assert client.post(url, headers=H, json={'id': rid, 'present': True}).status_code == 401

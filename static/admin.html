@@ -164,7 +164,7 @@
   }
 
   /* ---------- รายละเอียดการแข่งขัน ---------- */
-  var TABS = [['overview', 'ภาพรวม'], ['print', 'พิมพ์ใบรายงานตัว'], ['schedule', 'วันแข่ง / เวลาปิด'], ['logs', 'ประวัติการแก้ไข'], ['settings', 'ตั้งค่า']];
+  var TABS = [['overview', 'ภาพรวม'], ['checkin', 'รายงานตัว'], ['print', 'พิมพ์ใบรายงานตัว'], ['schedule', 'วันแข่ง / เวลาปิด'], ['logs', 'ประวัติการแก้ไข'], ['settings', 'ตั้งค่า']];
   function openComp(id, tab) {
     var load = A.comp && A.comp.id === id ? Promise.resolve() : http('GET', '/api/admin/competitions/' + id).then(function (d) {
       A.comp = d.comp; A.events = d.events; A.schools = d.schools;
@@ -190,7 +190,7 @@
       });
     };
     app.querySelectorAll('.subtabs button').forEach(function (b) { b.onclick = function () { go('comp/' + c.id + '/' + b.getAttribute('data-t')); }; });
-    ({ overview: tabOverview, print: tabPrint, schedule: tabSchedule, logs: tabLogs, settings: tabSettings }[tab] || tabOverview)();
+    ({ overview: tabOverview, checkin: tabCheckin, print: tabPrint, schedule: tabSchedule, logs: tabLogs, settings: tabSettings }[tab] || tabOverview)();
   }
   function tabEl() { return document.getElementById('tab'); }
 
@@ -359,6 +359,128 @@
         A.events = d.events; C.toast('บันทึกวันแข่งแล้ว'); tabSchedule();
       }).catch(fail);
     };
+  }
+
+  /* ---------- รับรายงานตัวนักกีฬา (หน้างาน) — เลือกได้หลายรายการ ---------- */
+  var CK = { timer: null, data: null, filter: 'all', q: '', sel: [] };
+  function todayBkk() { return new Date(Date.now() + 7 * 36e5).toISOString().slice(0, 10); }
+  function ckKey() { return 'ck_evs_' + A.comp.id; }
+  function tabCheckin() {
+    var names = A.events.map(function (e) { return e.event; }), saved = [];
+    try { saved = JSON.parse(C.store(ckKey()) || '[]'); } catch (e) { saved = []; }
+    CK.sel = saved.filter(function (n) { return names.indexOf(n) >= 0; });
+    if (!CK.sel.length) {
+      var today = todayBkk();
+      CK.sel = A.events.filter(function (e) { return e.startDate === today; }).map(function (e) { return e.event; });
+      if (!CK.sel.length && A.events[0]) CK.sel = [A.events[0].event];
+    }
+    tabEl().innerHTML = '<div style="display:grid;gap:12px">' +
+      '<details class="ck-pick" id="ckPick"><summary id="ckPickSum"></summary><div id="ckPickBody"></div></details>' +
+      '<div class="row"><input type="search" id="ckQ" placeholder="ค้นหาชื่อนักกีฬาหรือโรงเรียน" style="flex:1;min-width:180px">' +
+      '<div class="ck-filter" role="group">' + [['all', 'ทั้งหมด'], ['wait', 'ยังไม่มา'], ['done', 'มาแล้ว']].map(function (f) {
+        return '<button data-f="' + f[0] + '" aria-pressed="' + (CK.filter === f[0]) + '">' + f[1] + '</button>'; }).join('') + '</div></div>' +
+      '<div id="ckSum"></div><div id="ckList"><div class="loading">กำลังโหลด…</div></div></div>';
+    drawPicker();
+    document.getElementById('ckQ').oninput = function () { CK.q = this.value; drawCheckin(); };
+    tabEl().querySelectorAll('.ck-filter button').forEach(function (b) {
+      b.onclick = function () { CK.filter = b.getAttribute('data-f'); tabEl().querySelectorAll('.ck-filter button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); drawCheckin(); };
+    });
+    if (!CK.sel.length) document.getElementById('ckPick').open = true;
+    loadCheckin();
+    clearInterval(CK.timer);
+    CK.timer = setInterval(function () {
+      if (!document.getElementById('ckList')) { clearInterval(CK.timer); return; }
+      if (!document.hidden) loadCheckin(true);
+    }, 20000);
+  }
+  function drawPicker() {
+    var groups = {}, order = [], today = todayBkk();
+    A.events.forEach(function (e) { var d = e.startDate || ''; if (!groups[d]) { groups[d] = []; order.push(d); } groups[d].push(e); });
+    var shorts = A.events.filter(function (e) { return CK.sel.indexOf(e.event) >= 0; }).map(function (e) { return C.levelLabel(e.level) + ' ' + e.short; });
+    document.getElementById('ckPickSum').innerHTML = '<b>รายการที่รับรายงานตัว (' + CK.sel.length + ')</b> <span class="muted small">' +
+      esc(shorts.length ? (shorts.length > 4 ? shorts.slice(0, 4).join(', ') + ' และอีก ' + (shorts.length - 4) : shorts.join(', ')) : 'ยังไม่ได้เลือก — กดเพื่อเลือก') + '</span>';
+    document.getElementById('ckPickBody').innerHTML = order.map(function (d, gi) {
+      var evs = groups[d], allOn = evs.every(function (e) { return CK.sel.indexOf(e.event) >= 0; });
+      return '<div class="ck-day"><label class="ck-dayh"><input type="checkbox" data-day="' + gi + '"' + (allOn ? ' checked' : '') + '> <b>' +
+        esc(d ? 'แข่ง ' + thDate(d, true) + (d === today ? ' (วันนี้)' : '') : 'ยังไม่กำหนดวัน') + '</b> <span class="small muted">ทั้งวัน</span></label>' +
+        '<div class="ck-evs">' + evs.map(function (e) {
+          return '<label class="toggle"><input type="checkbox" data-ev="' + esc(e.event) + '"' + (CK.sel.indexOf(e.event) >= 0 ? ' checked' : '') + '> ' +
+            esc(C.levelLabel(e.level) + ' · ' + e.short) + '</label>';
+        }).join('') + '</div></div>';
+    }).join('') + '<div class="row" style="margin-top:6px"><button class="btn" id="ckNone">ล้างที่เลือก</button><button class="btn primary" id="ckDone">ตกลง</button></div>';
+    var body = document.getElementById('ckPickBody');
+    body.querySelectorAll('input[data-ev]').forEach(function (cb) {
+      cb.onchange = function () { setSel(cb.getAttribute('data-ev'), cb.checked); drawPicker(); loadCheckin(); };
+    });
+    body.querySelectorAll('input[data-day]').forEach(function (cb) {
+      cb.onchange = function () { groups[order[+cb.getAttribute('data-day')]].forEach(function (e) { setSel(e.event, cb.checked); }); drawPicker(); loadCheckin(); };
+    });
+    document.getElementById('ckNone').onclick = function () { CK.sel = []; saveSel(); drawPicker(); loadCheckin(); };
+    document.getElementById('ckDone').onclick = function () { document.getElementById('ckPick').open = false; };
+  }
+  function setSel(name, on) {
+    var i = CK.sel.indexOf(name);
+    if (on && i < 0) CK.sel.push(name); else if (!on && i >= 0) CK.sel.splice(i, 1);
+    saveSel();
+  }
+  function saveSel() { C.store(ckKey(), JSON.stringify(CK.sel)); }
+  function loadCheckin(quiet) {
+    var list = document.getElementById('ckList'); if (!list) return;
+    if (!CK.sel.length) { CK.data = null; document.getElementById('ckSum').innerHTML = ''; list.innerHTML = '<p class="muted">เลือกรายการแข่งขันด้านบนก่อน (เลือกได้หลายรายการ)</p>'; return; }
+    var qs = CK.sel.map(function (n) { return 'event=' + encodeURIComponent(n); }).join('&'), want = qs;
+    http('GET', '/api/admin/competitions/' + A.comp.id + '/checkin?' + qs).then(function (d) {
+      if (want !== CK.sel.map(function (n) { return 'event=' + encodeURIComponent(n); }).join('&')) return;   // เลือกเปลี่ยนระหว่างโหลด
+      CK.data = d; drawCheckin();
+    }).catch(function (e) { if (!quiet) fail(e); });
+  }
+  function drawCheckin() {
+    var d = CK.data, list = document.getElementById('ckList'); if (!d || !list) return;
+    // รวมเป็นรายคน: เด็กคนเดียวที่ลงหลายรายการที่เลือก แสดงแถวเดียว
+    var people = {}, order = [];
+    d.rows.forEach(function (r) {
+      var p = people[r.key];
+      if (!p) { p = people[r.key] = { key: r.key, school: r.school, name: r.name, items: [] }; order.push(r.key); }
+      p.items.push(r);
+    });
+    var all = order.map(function (k) { var p = people[k]; p.done = p.items.every(function (r) { return r.checkinAt; }); p.some = p.items.some(function (r) { return r.checkinAt; }); return p; });
+    var q = C.norm(CK.q);
+    var shown = all.filter(function (p) {
+      if (CK.filter === 'wait' && p.done) return false;
+      if (CK.filter === 'done' && !p.done) return false;
+      return !q || C.norm(p.name + p.school).indexOf(q) >= 0;
+    });
+    var present = all.filter(function (p) { return p.done; }).length, pct = all.length ? Math.round(present / all.length * 100) : 0;
+    document.getElementById('ckSum').innerHTML = '<div class="tile" style="gap:6px"><div class="row between"><span><b style="font-size:24px" class="num">' + present + '</b> <span class="muted">/ ' + all.length + ' คน มารายงานตัวแล้ว</span></span>' +
+      '<span class="small muted">อัปเดตเองทุก 20 วินาที</span></div><div class="bar"><i style="width:' + pct + '%"></i></div></div>' +
+      (d.unconfirmed.length ? '<details class="locked small" style="margin-top:8px"><summary>ยังไม่ยืนยันรายชื่อ ' + d.unconfirmed.length + ' รายการ (ไม่มีในรายการด้านล่าง) · กดดู</summary>' +
+        d.unconfirmed.map(function (u) { return esc(u.school + ' · ' + C.levelLabel(u.level) + ' ' + u.short); }).join('<br>') + '</details>' : '');
+    if (!shown.length) { list.innerHTML = '<p class="muted">' + (all.length ? 'ไม่พบรายชื่อตามที่ค้นหา' : 'ยังไม่มีโรงเรียนยืนยันรายชื่อในรายการที่เลือก') + '</p>'; return; }
+    var bySchool = {}, sorder = [];
+    shown.forEach(function (p) { if (!bySchool[p.school]) { bySchool[p.school] = []; sorder.push(p.school); } bySchool[p.school].push(p); });
+    var multi = CK.sel.length > 1;
+    list.innerHTML = sorder.map(function (s) {
+      var mates = all.filter(function (p) { return p.school === s; }), n = mates.filter(function (p) { return p.done; }).length;
+      return '<section class="ck-school"><div class="ck-head"><b>' + esc(s) + '</b><span class="pill ' + (n === mates.length ? 'ok' : 'wait') + ' num">' + n + '/' + mates.length + '</span></div>' +
+        bySchool[s].map(function (p) {
+          var tags = p.items.map(function (r) { return (multi ? C.levelLabel(r.level) + ' ' + r.short + ' · ' : '') + r.teamLabel; }).join(' | ');
+          var first = p.items.filter(function (r) { return r.checkinAt; })[0];
+          return '<div class="ck-row' + (p.done ? ' done' : '') + '"><div class="ck-name"><span class="small muted">' + esc(tags) + '</span><b>' + esc(p.name) + '</b>' +
+            (first ? '<span class="small" style="color:var(--ok)">' + (p.done ? 'มาแล้ว ' : 'มาแล้วบางรายการ ') + esc(first.checkinAt.slice(11, 16)) + ' น. · ' + esc(first.checkinBy) + '</span>' : '') + '</div>' +
+            '<button class="btn ' + (p.done ? '' : 'primary') + ' ck-btn" data-k="' + esc(p.key) + '">' + (p.done ? 'ยกเลิก' : 'รายงานตัว') + '</button></div>';
+        }).join('') + '</section>';
+    }).join('');
+    list.querySelectorAll('.ck-btn').forEach(function (b) {
+      b.onclick = function () {
+        var p = people[b.getAttribute('data-k')], on = !p.done;
+        if (!on && !window.confirm('ยกเลิกการรายงานตัวของ ' + p.name + '?')) return;
+        var ids = p.items.filter(function (r) { return on ? !r.checkinAt : true; }).map(function (r) { return r.id; });
+        b.disabled = true;
+        http('POST', '/api/admin/competitions/' + A.comp.id + '/checkin', { ids: ids, present: on }).then(function (res) {
+          CK.data.rows.forEach(function (r) { if (res.ids.indexOf(r.id) >= 0) { r.checkinAt = res.checkinAt; r.checkinBy = res.checkinBy; } });
+          drawCheckin();
+        }).catch(function (e) { b.disabled = false; fail(e); });
+      };
+    });
   }
 
   /* ---------- ประวัติ ---------- */

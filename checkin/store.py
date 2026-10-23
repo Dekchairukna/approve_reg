@@ -24,7 +24,7 @@ def comp_public(c):
 
 def load_events(cid):
     return [dict(id=r['id'], event=r['name'], short=r['short'], level=r['level'], category=r['category'],
-                 startDate=r['start_date'], startTime=r['start_time'], deadline=r['deadline'])
+                 startDate=r['start_date'], startTime=r['start_time'], deadline=r['deadline'], sort=r['sort'])
             for r in get_db().execute(
                 "SELECT * FROM events WHERE comp_id=? ORDER BY CASE WHEN start_date='' THEN 1 ELSE 0 END, "
                 "start_date, sort", (cid,))]
@@ -37,7 +37,8 @@ def load_entries(cid, school=None):
         args.append(school)
     return [dict(id=r['id'], event=r['event'], school=r['school'], level=r['level'], team=r['team'],
                  prefix=r['prefix'], first=r['first'], last=r['last'], status=r['status'], by=r['by_name'],
-                 phone=r['phone'], at=r['at'], oPrefix=r['o_prefix'], oFirst=r['o_first'], oLast=r['o_last'])
+                 phone=r['phone'], at=r['at'], oPrefix=r['o_prefix'], oFirst=r['o_first'], oLast=r['o_last'],
+                 checkinAt=r['checkin_at'], checkinBy=r['checkin_by'])
             for r in get_db().execute(q + ' ORDER BY id', args)]
 
 

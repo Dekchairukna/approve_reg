@@ -62,7 +62,9 @@ CREATE TABLE IF NOT EXISTS entries (
   at TEXT NOT NULL DEFAULT '',
   o_prefix TEXT NOT NULL DEFAULT '',
   o_first TEXT NOT NULL DEFAULT '',
-  o_last TEXT NOT NULL DEFAULT ''
+  o_last TEXT NOT NULL DEFAULT '',
+  checkin_at TEXT NOT NULL DEFAULT '',          -- เวลามารายงานตัว (ว่าง = ยังไม่มา)
+  checkin_by TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS ix_entries_comp_school ON entries(comp_id, school);
 CREATE TABLE IF NOT EXISTS confs (
@@ -187,11 +189,18 @@ def init_db(target, upload_dir=None):
             for stmt in PG_SCHEMA.split(';'):
                 if stmt.strip():
                     db.execute(stmt)
+            for col in ('checkin_at', 'checkin_by'):
+                db.execute(f"ALTER TABLE entries ADD COLUMN IF NOT EXISTS {col} TEXT NOT NULL DEFAULT ''")
     else:
         _migrate_sqlite_v1(db)
         db.conn.executescript(SQLITE_SCHEMA)
         db.commit()
         _migrate_sqlite_v2(db, upload_dir)
+        cols = db.columns('entries')
+        for col in ('checkin_at', 'checkin_by'):
+            if col not in cols:
+                db.execute(f"ALTER TABLE entries ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
+        db.commit()
     db.close()
 
 

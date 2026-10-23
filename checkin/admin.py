@@ -211,6 +211,63 @@ def print_data(cid):
     return jsonify(logic.print_data(entries, events, confs, request.get_json(silent=True) or {}))
 
 
+@bp.get('/api/admin/competitions/<int:cid>/checkin')
+@login_required()
+def checkin_list(cid):
+    """รายชื่อสำหรับรับรายงานตัว: นักกีฬาที่ยืนยันแล้วของรายการที่เลือก (เลือกได้หลายรายการ ?event=..&event=..)"""
+    _comp_or_404(cid)
+    names = [n for n in request.args.getlist('event') if n]
+    em = {e['event']: e for e in store.load_events(cid)}
+    names = [n for n in names if n in em]
+    if not names:
+        return jsonify(rows=[], unconfirmed=[], events=[])
+    want = set(names)
+    entries = [e for e in store.load_entries(cid) if e['event'] in want]
+    confirmed = {(c['school'], c['event']) for c in store.load_confs(cid) if c['event'] in want}
+    rows = sorted((e for e in entries if e['status'] == logic.OK),
+                  key=lambda e: (e['school'], e['first'], e['last'], em[e['event']].get('sort', 0)))
+    out = [dict(id=e['id'], school=e['school'], event=e['event'], short=em[e['event']]['short'],
+                level=em[e['event']]['level'], teamLabel=logic.team_label(e['team'], em[e['event']]['category']),
+                name=f"{e['prefix']}{e['first']} {e['last']}", key=logic.pkey(e['school'], e['first'], e['last']),
+                checkinAt=e['checkinAt'], checkinBy=e['checkinBy']) for e in rows]
+    unconfirmed = sorted({(e['school'], em[e['event']]['short'], em[e['event']]['level']) for e in entries
+                          if (e['school'], e['event']) not in confirmed})
+    return jsonify(rows=out, events=names,
+                   unconfirmed=[dict(school=s, short=sh, level=lv) for s, sh, lv in unconfirmed])
+
+
+@bp.post('/api/admin/competitions/<int:cid>/checkin')
+@login_required()
+def checkin_mark(cid):
+    """บันทึกรายงานตัว ส่ง ids (หลายรายการของเด็กคนเดียว) หรือ id"""
+    _comp_or_404(cid)
+    d = request.get_json(silent=True) or {}
+    try:
+        ids = [int(x) for x in (d.get('ids') or [d.get('id')])]
+    except (TypeError, ValueError):
+        return err('ข้อมูลไม่ถูกต้อง')
+    conn = get_db()
+    present = bool(d.get('present'))
+    at = logic.stamp() if present else ''
+    who = (g.user.get('name') or g.user['username']) if present else ''
+    done = []
+    with conn:
+        for eid in ids:
+            row = conn.execute('SELECT * FROM entries WHERE id=? AND comp_id=?', (eid, cid)).fetchone()
+            if not row:
+                continue
+            conn.execute('UPDATE entries SET checkin_at=?, checkin_by=? WHERE id=?', (at, who, eid))
+            conn.execute('INSERT INTO logs (comp_id, at, school, event, entry_id, action, before, after, staff_user) '
+                         'VALUES (?,?,?,?,?,?,?,?,?)',
+                         (cid, logic.stamp(), row['school'], row['event'], eid,
+                          'รายงานตัว' if present else 'ยกเลิกรายงานตัว', '',
+                          f"{row['prefix']}{row['first']} {row['last']}", g.user['username']))
+            done.append(eid)
+    if not done:
+        return err('ไม่พบนักกีฬา', 404)
+    return jsonify(ok=True, ids=done, checkinAt=at, checkinBy=who)
+
+
 @bp.get('/api/admin/competitions/<int:cid>/logs')
 @login_required()
 def logs(cid):
@@ -255,11 +312,12 @@ def export_excel(cid):
     ws = wb.active
     ws.title = 'รายชื่อนักกีฬา'
     ws.append(['รายการแข่งขัน', 'โรงเรียน', 'คำนำหน้า', 'ชื่อ', 'นามสกุล', 'ระดับชั้น', 'คู่ที่/ทีมที่/มือวาง', 'สถานะ',
-               'ผู้ยืนยัน/แก้ไข', 'เบอร์โทร', 'เวลาที่บันทึก', 'ชื่อเดิม', 'วันแข่ง'])
+               'ผู้ยืนยัน/แก้ไข', 'เบอร์โทร', 'เวลาที่บันทึก', 'ชื่อเดิม', 'วันแข่ง', 'เวลารายงานตัว', 'ผู้รับรายงานตัว'])
     for e in entries:
         ws.append([e['event'], e['school'], e['prefix'], e['first'], e['last'], e['level'],
                    int(e['team']) if str(e['team']).isdigit() else e['team'], e['status'], e['by'], e['phone'], e['at'],
-                   f"{e['oPrefix']}{e['oFirst']} {e['oLast']}", em.get(e['event'], {}).get('startDate', '')])
+                   f"{e['oPrefix']}{e['oFirst']} {e['oLast']}", em.get(e['event'], {}).get('startDate', ''),
+                   e['checkinAt'], e['checkinBy']])
     ws2 = wb.create_sheet('การยืนยัน')
     ws2.append(['โรงเรียน', 'รายการแข่งขัน', 'ผู้ยืนยัน', 'เบอร์โทร', 'เวลายืนยัน', 'จำนวนนักกีฬา'])
     for x in confs:
