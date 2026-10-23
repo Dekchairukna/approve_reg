@@ -223,3 +223,8 @@ table.t select { min-width: 130px }
 .ck-dayh { display: flex; gap: 6px; align-items: center; cursor: pointer; padding-bottom: 2px; border-bottom: 1px solid var(--line) }
 .ck-evs { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 2px 12px; padding-left: 22px }
 .ck-evs .toggle { padding-top: 4px; color: var(--ink) }
+
+/* แก้ชื่อนักกีฬา */
+.ath-row { display: grid; gap: 4px; padding: 10px 0; border-bottom: 1px solid var(--line) }
+.ath-f { display: grid; grid-template-columns: 96px 1fr 1fr auto; gap: 8px; align-items: center }
+@media (max-width: 560px) { .ath-f { grid-template-columns: 1fr 1fr } .ath-f .a-pre { grid-column: 1 / -1 } .ath-f .a-save { grid-column: 1 / -1 } }

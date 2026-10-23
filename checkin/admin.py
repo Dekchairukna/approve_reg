@@ -222,14 +222,15 @@ def checkin_list(cid):
     if not names:
         return jsonify(rows=[], unconfirmed=[], events=[])
     want = set(names)
-    entries = [e for e in store.load_entries(cid) if e['event'] in want]
-    confirmed = {(c['school'], c['event']) for c in store.load_confs(cid) if c['event'] in want}
+    all_entries, _, all_confs = store.load_all(cid)
+    entries = [e for e in all_entries if e['event'] in want]
+    confirmed = {(c['school'], c['event']) for c in all_confs if c['event'] in want}
     rows = sorted((e for e in entries if e['status'] == logic.OK),
                   key=lambda e: (e['school'], e['first'], e['last'], em[e['event']].get('sort', 0)))
     out = [dict(id=e['id'], school=e['school'], event=e['event'], short=em[e['event']]['short'],
                 level=em[e['event']]['level'], teamLabel=logic.team_label(e['team'], em[e['event']]['category']),
                 name=f"{e['prefix']}{e['first']} {e['last']}", key=logic.pkey(e['school'], e['first'], e['last']),
-                checkinAt=e['checkinAt'], checkinBy=e['checkinBy']) for e in rows]
+                checkinAt=e['checkinAt'], checkinBy=e['checkinBy'], auto=bool(e.get('auto'))) for e in rows]
     unconfirmed = sorted({(e['school'], em[e['event']]['short'], em[e['event']]['level']) for e in entries
                           if (e['school'], e['event']) not in confirmed})
     return jsonify(rows=out, events=names,
@@ -266,6 +267,99 @@ def checkin_mark(cid):
     if not done:
         return err('ไม่พบนักกีฬา', 404)
     return jsonify(ok=True, ids=done, checkinAt=at, checkinBy=who)
+
+
+@bp.get('/api/admin/competitions/<int:cid>/roster.xlsx')
+@login_required()
+def roster_excel(cid):
+    """รายชื่อที่ยืนยันแล้ว (รวมยืนยันอัตโนมัติ) แบบตาราง สำหรับนำไปลงระบบอื่น เช่น ระบบ Shooting
+    กรองได้ด้วย ?startDate=&level=&category=&school="""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    c = _comp_or_404(cid)
+    f = {k: request.args.get(k, '') for k in ('startDate', 'level', 'category', 'school')}
+    entries, events, confs = store.load_all(cid)
+    d = logic.print_data(entries, events, confs, f)
+    em = {e['event']: e for e in events}
+    by_key = {}
+    for e in entries:
+        if e['status'] == logic.OK:
+            by_key.setdefault((e['school'], e['event']), []).append(e)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'รายชื่อที่ยืนยัน'
+    head = ['ลำดับ', 'รายการแข่งขัน', 'ชื่อย่อรายการ', 'ประเภท', 'ระดับชั้น', 'วันแข่ง', 'โรงเรียน', 'ทีม/คู่',
+            'คำนำหน้า', 'ชื่อ', 'นามสกุล', 'ชื่อ-นามสกุล', 'การยืนยัน']
+    ws.append(head)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+    n = 0
+    for page in d['pages']:
+        for b in page['blocks']:
+            ev = em[b['event']]
+            for e in sorted(by_key.get((page['school'], b['event']), []), key=logic.team_sort):
+                n += 1
+                ws.append([n, b['event'], ev['short'], ev['category'], ev['level'], ev['startDate'], page['school'],
+                           logic.team_label(e['team'], ev['category']), e['prefix'], e['first'], e['last'],
+                           f"{e['prefix']}{e['first']} {e['last']}",
+                           'อัตโนมัติ (เลยเวลาปิด)' if b['conf'].get('auto') else 'โรงเรียนยืนยัน'])
+    ws.freeze_panes = 'A2'
+    ws.auto_filter.ref = ws.dimensions
+    for col in ws.columns:
+        ws.column_dimensions[col[0].column_letter].width = min(max(len(str(x.value or '')) for x in col) + 2, 50)
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    tag = '_'.join(x for x in (f['category'], f['startDate']) if x) or 'ทั้งหมด'
+    return send_file(buf, as_attachment=True, download_name=f"รายชื่อยืนยัน_{c['slug']}_{tag}.xlsx",
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
+@bp.get('/api/admin/competitions/<int:cid>/athletes')
+@login_required()
+def athletes(cid):
+    """รายชื่อนักกีฬา (ไม่ซ้ำคน) ของโรงเรียน สำหรับแก้ชื่อที่สะกดผิด"""
+    _comp_or_404(cid)
+    school = request.args.get('school') or ''
+    em = {e['event']: e for e in store.load_events(cid)}
+    people = {}
+    for e in store.load_entries(cid, school):
+        k = logic.pkey(e['school'], e['first'], e['last'])
+        p = people.setdefault(k, dict(key=k, prefix=e['prefix'], first=e['first'], last=e['last'], events=[]))
+        if e['status'] != logic.OUT:
+            ev = em.get(e['event'], {})
+            lv = {'ประถมศึกษา': 'ประถม', 'มัธยมศึกษาตอนต้น': 'ม.ต้น', 'มัธยมศึกษาตอนปลาย': 'ม.ปลาย'}.get(ev.get('level', ''), ev.get('level', ''))
+            p['events'].append(f"{lv} {ev.get('short', e['event'])}".strip())
+    rows = sorted(people.values(), key=lambda p: (p['first'], p['last']))
+    return jsonify(athletes=rows)
+
+
+@bp.post('/api/admin/competitions/<int:cid>/athletes/rename')
+@login_required('admin')
+def rename_athlete(cid):
+    """แก้ชื่อสะกดผิด: เปลี่ยนทุกแถวของเด็กคนนี้ในโรงเรียนนี้ ทั้งชื่อปัจจุบันและชื่อตามใบสมัคร"""
+    _comp_or_404(cid)
+    d = request.get_json(silent=True) or {}
+    school, key = d.get('school') or '', d.get('key') or ''
+    p, f, l = logic.clean(d.get('prefix'))[:20], logic.clean(d.get('first'))[:80], logic.clean(d.get('last'))[:80]
+    if not f or not l:
+        return err('กรุณากรอกชื่อและนามสกุล')
+    conn = get_db()
+    rows = conn.execute('SELECT * FROM entries WHERE comp_id=? AND school=?', (cid, school)).fetchall()
+    cur = [r for r in rows if logic.pkey(r['school'], r['first'], r['last']) == key]
+    orig = [r for r in rows if logic.pkey(r['school'], r['o_first'], r['o_last']) == key]
+    if not cur and not orig:
+        return err('ไม่พบนักกีฬาคนนี้ กรุณาโหลดหน้าใหม่', 404)
+    old = cur[0] if cur else orig[0]
+    old_name = f"{old['prefix']}{old['first']} {old['last']}"
+    with conn:
+        for r in cur:
+            conn.execute('UPDATE entries SET prefix=?, first=?, last=? WHERE id=?', (p, f, l, r['id']))
+        for r in orig:
+            conn.execute('UPDATE entries SET o_prefix=?, o_first=?, o_last=? WHERE id=?', (p, f, l, r['id']))
+        conn.execute('INSERT INTO logs (comp_id, at, school, event, action, before, after, staff_user) VALUES (?,?,?,?,?,?,?,?)',
+                     (cid, logic.stamp(), school, '', 'แก้ชื่อสะกด', old_name, f'{p}{f} {l}', g.user['username']))
+    return jsonify(ok=True, updated=len({r['id'] for r in cur + orig}))
 
 
 @bp.get('/api/admin/competitions/<int:cid>/logs')
@@ -315,13 +409,14 @@ def export_excel(cid):
                'ผู้ยืนยัน/แก้ไข', 'เบอร์โทร', 'เวลาที่บันทึก', 'ชื่อเดิม', 'วันแข่ง', 'เวลารายงานตัว', 'ผู้รับรายงานตัว'])
     for e in entries:
         ws.append([e['event'], e['school'], e['prefix'], e['first'], e['last'], e['level'],
-                   int(e['team']) if str(e['team']).isdigit() else e['team'], e['status'], e['by'], e['phone'], e['at'],
+                   int(e['team']) if str(e['team']).isdigit() else e['team'],
+                   e['status'] + (' (อัตโนมัติ เลยเวลาปิด)' if e.get('auto') else ''), e['by'], e['phone'], e['at'],
                    f"{e['oPrefix']}{e['oFirst']} {e['oLast']}", em.get(e['event'], {}).get('startDate', ''),
                    e['checkinAt'], e['checkinBy']])
     ws2 = wb.create_sheet('การยืนยัน')
     ws2.append(['โรงเรียน', 'รายการแข่งขัน', 'ผู้ยืนยัน', 'เบอร์โทร', 'เวลายืนยัน', 'จำนวนนักกีฬา'])
     for x in confs:
-        ws2.append([x['school'], x['event'], x['by'], x['phone'], x['at'], x['count']])
+        ws2.append([x['school'], x['event'], x['by'], x['phone'], x['at'], x['count']])   # รวมรายการยืนยันอัตโนมัติ
     ws3 = wb.create_sheet('ประวัติการแก้ไข')
     ws3.append(['เวลา', 'โรงเรียน', 'รายการแข่งขัน', 'การกระทำ', 'ก่อน', 'หลัง', 'ผู้แก้ไข', 'เบอร์โทร', 'บัญชีเจ้าหน้าที่'])
     for r in get_db().execute('SELECT at, school, event, action, before, after, by_name, phone, staff_user FROM logs '

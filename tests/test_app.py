@@ -118,9 +118,9 @@ def test_deadline_blocks_public_but_not_staff(client):
     evs = client.get(f'/api/admin/competitions/{cid}', headers=H).json['events']
     client.post(f'/api/admin/competitions/{cid}/events', headers=H, json={'events': [
         dict(id=e['id'], short=e['short'], startDate='2020-01-02', startTime='08.30', deadline='2020-01-01 18:00') for e in evs]})
-    assert submit(client, 'เปตอง : ประถมศึกษา คู่ ชาย')['ok']          # เจ้าหน้าที่ยังแก้ได้
+    assert submit(client, 'เปตอง : เดี่ยว ประถมศึกษา บุคคล หญิง')['ok']   # เจ้าหน้าที่ยังแก้ได้
     client.post('/api/auth/logout', headers=H)
-    r = submit(client, 'เปตอง : ประถมศึกษา คู่ ชาย')
+    r = submit(client, 'เปตอง : เดี่ยว ประถมศึกษา บุคคล หญิง')
     assert not r['ok'] and 'ปิดรับยืนยัน' in r['errors'][0]
 
 
@@ -245,3 +245,39 @@ def test_checkin_by_staff(client):
     rid = nueng[0]
     client.post('/api/auth/logout', headers=H)
     assert client.post(url, headers=H, json={'id': rid, 'present': True}).status_code == 401
+
+
+def test_auto_confirm_after_deadline(client):
+    cid = setup_comp(client)
+    submit(client, 'เปตอง : ประถมศึกษา คู่ ชาย')                       # โรงเรียนเอยืนยันเองรายการเดียว
+    evs = client.get(f'/api/admin/competitions/{cid}', headers=H).json['events']
+    client.post(f'/api/admin/competitions/{cid}/events', headers=H, json={'events': [
+        dict(id=e['id'], short=e['short'], startDate='2020-01-02', startTime='08.30', deadline='2020-01-01 18:00') for e in evs]})
+    o = client.get(f'/api/admin/competitions/{cid}/overview').json
+    assert o['totals']['pairsDone'] == o['totals']['pairsTotal'] and o['totals']['pairsAuto'] == o['totals']['pairsTotal'] - 1
+    d = client.post(f'/api/admin/competitions/{cid}/print', headers=H, json={}).json
+    assert not d['skipped'] and any(b['conf'].get('auto') for p in d['pages'] for b in p['blocks'])
+    ck = client.get(f'/api/admin/competitions/{cid}/checkin?event=เปตอง : ประถมศึกษา ทีม 3 คน ชาย').json
+    assert ck['rows'] and all(r['auto'] for r in ck['rows']) and not ck['unconfirmed']
+    v = client.post('/api/c/test/school', json={'school': 'โรงเรียนบี'}, headers=H).json
+    assert v['events'][0]['confirmation']['auto']
+
+
+def test_rename_athlete_and_roster_export(client):
+    cid = setup_comp(client)
+    submit(client, 'เปตอง : ประถมศึกษา คู่ ชาย')
+    a = client.get(f'/api/admin/competitions/{cid}/athletes?school=โรงเรียนเอ').json['athletes']
+    nueng = next(x for x in a if x['first'] == 'หนึ่ง')
+    assert len(nueng['events']) == 4
+    r = client.post(f'/api/admin/competitions/{cid}/athletes/rename', headers=H,
+                    json={'school': 'โรงเรียนเอ', 'key': nueng['key'], 'prefix': 'ด.ช.', 'first': 'หนึ่งเดียว', 'last': 'ทดสอบ'}).json
+    assert r['ok'] and r['updated'] == 4
+    v = client.post('/api/c/test/school', json={'school': 'โรงเรียนเอ'}, headers=H).json
+    names = {x['first'] for e in v['events'] for x in e['entries']} | {p['first'] for e in v['events'] for p in e['pool']}
+    assert 'หนึ่งเดียว' in names and 'หนึ่ง' not in names
+    x = client.get(f'/api/admin/competitions/{cid}/roster.xlsx?category=คู่')
+    assert x.status_code == 200
+    from openpyxl import load_workbook
+    ws = load_workbook(io.BytesIO(x.data)).active
+    vals = [row[11] for row in ws.iter_rows(min_row=2, values_only=True)]
+    assert vals == ['ด.ช.หนึ่งเดียว ทดสอบ', 'ด.ช.สอง ทดสอบ']

@@ -47,8 +47,13 @@ def load_confs(cid):
             for r in get_db().execute('SELECT * FROM confs WHERE comp_id=?', (cid,))]
 
 
-def load_all(cid):
-    return load_entries(cid), load_events(cid), load_confs(cid)
+def load_all(cid, auto=True):
+    """auto=True: รายการที่เลยเวลาปิดแล้วยังไม่ยืนยัน ถือว่ายืนยันตามที่สมัคร (ดู logic.apply_auto)"""
+    from . import logic
+    entries, events, confs = load_entries(cid), load_events(cid), load_confs(cid)
+    if auto:
+        entries, confs = logic.apply_auto(entries, events, confs, logic.now_bkk())
+    return entries, events, confs
 
 
 def schools(cid):

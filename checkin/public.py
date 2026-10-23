@@ -75,8 +75,9 @@ def info(slug):
 def school(slug):
     c = _comp(slug)
     s = (request.get_json(silent=True) or {}).get('school') or ''
-    return jsonify(logic.school_view(store.load_entries(c['id'], s), store.load_events(c['id']),
-                                     store.load_confs(c['id']), s, logic.now_bkk(), c['max_events']))
+    events = store.load_events(c['id'])
+    entries, confs = logic.apply_auto(store.load_entries(c['id'], s), events, store.load_confs(c['id']), logic.now_bkk())
+    return jsonify(logic.school_view(entries, events, confs, s, logic.now_bkk(), c['max_events']))
 
 
 @bp.post('/api/c/<slug>/submit')
@@ -88,6 +89,7 @@ def submit(slug):
     with write_lock:
         conn = get_db()
         entries, events = store.load_entries(c['id'], school), store.load_events(c['id'])
+        entries, _ = logic.apply_auto(entries, events, store.load_confs(c['id']), logic.now_bkk())
         res = logic.apply_submit(entries, events, payload, logic.now_bkk(), staff, c['max_events'])
         if not res['ok']:
             return jsonify(res)
@@ -111,6 +113,7 @@ def submit(slug):
                              'VALUES (?,?,?,?,?,?,?,?,?,?,?)',
                              [(c['id'], l['at'], l['school'], l['event'], l['entry_id'], l['action'], l['before'],
                                l['after'], l['by'], l['phone'], l['user']) for l in res['logs']])
-    view = logic.school_view(store.load_entries(c['id'], school), store.load_events(c['id']),
-                             store.load_confs(c['id']), school, logic.now_bkk(), c['max_events'])
+    events = store.load_events(c['id'])
+    entries, confs = logic.apply_auto(store.load_entries(c['id'], school), events, store.load_confs(c['id']), logic.now_bkk())
+    view = logic.school_view(entries, events, confs, school, logic.now_bkk(), c['max_events'])
     return jsonify(ok=True, conf=res['conf'], view=view)

@@ -107,6 +107,31 @@ def roster(entries, ev):
     return out
 
 
+AUTO_BY = 'ยืนยันอัตโนมัติ (เลยเวลาปิด ใช้รายชื่อตามที่สมัคร)'
+
+
+def apply_auto(entries, events, confs, now):
+    """เลยเวลาปิดแล้วโรงเรียนยังไม่ยืนยันรายการใด ให้ถือว่ายืนยันตามรายชื่อที่ลงไว้ในระบบ
+    คำนวณตอนอ่านข้อมูล (ไม่เขียนลงฐานข้อมูล) คืน (entries, confs) ชุดใหม่ ที่มีเครื่องหมาย auto=True"""
+    closed = {e['event']: e for e in events if is_closed(e, now)}
+    have = {(c['school'], c['event']) for c in confs}
+    auto = {}
+    out = []
+    for e in entries:
+        k = (e['school'], e['event'])
+        if e['event'] in closed and k not in have:
+            if e['status'] == PENDING:
+                e = dict(e, status=OK, auto=True)
+            if e['status'] == OK:
+                auto[k] = auto.get(k, 0) + 1
+            else:
+                auto.setdefault(k, 0)
+        out.append(e)
+    extra = [dict(school=s, event=ev, by=AUTO_BY, phone='', at=closed[ev]['deadline'], count=n, auto=True)
+             for (s, ev), n in auto.items()]
+    return out, list(confs) + extra
+
+
 def school_view(entries, events, confs, school, now, max_events):
     cm = {(c['school'], c['event']): c for c in confs}
     by_event = {}
@@ -275,14 +300,16 @@ def overview(entries, events, confs, now, max_events):
                     entriesConfirmed=sum(e['status'] == OK for e in entries),
                     entriesWithdrawn=sum(e['status'] == OUT for e in entries),
                     entriesTotal=len(entries),
-                    pairsTotal=len(pairs), pairsDone=sum(1 for p in pairs if p in cm)),
+                    pairsTotal=len(pairs), pairsDone=sum(1 for p in pairs if p in cm),
+                    pairsAuto=sum(1 for p in pairs if p in cm and cm[p].get('auto'))),
         over=[p for p in pc.values() if max_events and len(p['events']) > max_events])
 
 
 def print_data(entries, events, confs, f):
     cm = {(c['school'], c['event']): c for c in confs}
     evs = [ev for ev in events if (not f.get('startDate') or ev['startDate'] == f['startDate'])
-           and (not f.get('level') or ev['level'] == f['level'])]
+           and (not f.get('level') or ev['level'] == f['level'])
+           and (not f.get('category') or ev['category'] == f['category'])]
     pages, skipped = [], []
     for s in schools_of(entries):
         if f.get('school') and s != f['school']:

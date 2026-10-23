@@ -84,6 +84,7 @@
 
   /* ขั้นที่ 2: เลือกระดับและรายการ */
   function evStatus(e) {
+    if (e.confirmation && e.confirmation.auto) return { cls: 'ok', text: 'ยืนยันอัตโนมัติ' };
     if (e.confirmation) return { cls: 'ok', text: 'ยืนยันแล้ว' };
     if (e.closed) return { cls: 'bad', text: 'ไม่ได้ยืนยัน' };
     return { cls: 'wait', text: 'รอยืนยัน' };
@@ -106,7 +107,7 @@
           var st = evStatus(e), n = e.entries.filter(function (x) { return x.status !== ST.OUT; }).length;
           return '<button class="ev" data-e="' + esc(e.event) + '"><span class="name">' + esc(e.short) + '</span>' +
             '<span class="pill ' + st.cls + '">' + st.text + '</span>' +
-            '<span class="meta num">' + n + ' คน' + (e.confirmation ? ' · โดย ' + esc(e.confirmation.by) + ' ' + esc(thDateTime(e.confirmation.at)) : '') + '</span></button>';
+            '<span class="meta num">' + n + ' คน' + (e.confirmation ? (e.confirmation.auto ? ' · เลยเวลาปิด ใช้รายชื่อตามที่สมัคร' : ' · โดย ' + esc(e.confirmation.by) + ' ' + esc(thDateTime(e.confirmation.at))) : '') + '</span></button>';
         }).join('') + '</div>';
     }).join('');
     app.innerHTML = staffNote() + '<section class="card" style="display:grid;gap:14px">' +
@@ -171,7 +172,8 @@
   }
   function renderEditor() {
     var e = S.ev, ed = canEdit(), st = evStatus(e), tw = tword(), size = e.size || 1, dis = ed ? '' : ' disabled';
-    var head = e.confirmation ? '<div class="confirmed">ยืนยันแล้วเมื่อ ' + esc(thDateTime(e.confirmation.at)) + ' โดย ' + esc(e.confirmation.by) +
+    var head = e.confirmation && e.confirmation.auto ? '<div class="confirmed">ยืนยันอัตโนมัติ: ไม่มีการยืนยันก่อนปิด ' + esc(thDateTime(e.deadline)) + ' ระบบจึงใช้รายชื่อตามที่สมัครไว้</div>'
+      : e.confirmation ? '<div class="confirmed">ยืนยันแล้วเมื่อ ' + esc(thDateTime(e.confirmation.at)) + ' โดย ' + esc(e.confirmation.by) +
       ' โทร ' + esc(e.confirmation.phone) + (ed && e.deadline ? '<br>แก้ไขและยืนยันซ้ำได้จนถึง ' + esc(thDateTime(e.deadline)) : '') + '</div>' : '';
     if (!ed) head += '<div class="locked">ปิดรับยืนยันรายการนี้แล้วเมื่อ ' + esc(thDateTime(e.deadline)) + ' หากต้องแก้ไข ติดต่อเจ้าหน้าที่</div>';
     else if (e.closed) head += '<div class="locked">เลยเวลาปิดยืนยันแล้ว กำลังแก้ไขในฐานะเจ้าหน้าที่</div>';
