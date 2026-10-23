@@ -122,22 +122,32 @@
     return S.staff ? '<div class="locked small">เข้าสู่ระบบเจ้าหน้าที่อยู่ แก้ไขได้แม้เลยเวลาปิดยืนยัน และการแก้ไขจะบันทึกชื่อบัญชีของคุณ</div>' : '';
   }
 
-  /* ขั้นที่ 3: ยืนยัน/แก้ไขรายชื่อ */
+  /* ขั้นที่ 3: ยืนยัน/แก้ไขรายชื่อ — แบ่งเป็นกล่องตามทีม/คู่ แต่ละกล่องมีช่องตามจำนวนที่กำหนด (รวมตัวสำรอง) */
+  function tword() { return /คู่/.test(S.ev.category) ? 'คู่ที่' : 'ทีมที่'; }
   function openEvent(name) {
     S.ev = S.view.events.filter(function (x) { return x.event === name; })[0];
-    S.errors = []; S.draft = {};
-    var n = S.ev.entries.length, single = /เดี่ยว|Shooting|บุคคล/.test(S.ev.category), size = /ทีม/.test(S.ev.category) ? 4 : 3;
+    S.errors = [];
+    var size = S.ev.size || 1, teams = { '1': [], '2': [] }, extra = 0;
     S.ev.entries.forEach(function (x, i) {
-      // ทีมที่: ใช้ตามไฟล์ถ้ามี ไม่มี (999) ให้เดาไว้ก่อน แล้วให้ผู้ยืนยันเลือกเอง
-      var t = (x.team === '1' || x.team === '2') ? x.team : single ? String(Math.min(i + 1, 2)) : (n <= size || i < Math.ceil(n / 2) ? '1' : '2');
-      S.draft[x.id] = { team: t, prefix: x.prefix, first: x.first, last: x.last, out: x.status === ST.OUT };
+      // ทีมตามไฟล์ถ้ามี ไม่มี (999) ให้เรียงลงทีม 1 ก่อน เต็มแล้วไปทีม 2
+      var want = (x.team === '1' || x.team === '2') ? x.team : (size === 1 ? String(Math.min(i + 1, 2)) : (teams['1'].length < size ? '1' : '2'));
+      var other = want === '1' ? '2' : '1';
+      var t = teams[want].length < size ? want : (teams[other].length < size ? other : want);
+      teams[t].push({ key: 'e' + x.id, id: x.id, team: t, entry: x, prefix: x.prefix, first: x.first, last: x.last, blank: x.status === ST.OUT });
+    });
+    S.shown = { '1': true, '2': teams['2'].length > 0 };
+    S.slots = [];
+    ['1', '2'].forEach(function (t) {
+      while (teams[t].length < size) teams[t].push({ key: 'n' + (extra++), id: null, team: t, entry: null, prefix: '', first: '', last: '', blank: true });
+      S.slots = S.slots.concat(teams[t]);
     });
     renderEditor();
   }
   function canEdit() { return !S.ev.closed || !!S.staff; }
-  function slotInfo(x) {
-    var d = S.draft[x.id], k = pkey(d.first, d.last), out = [], max = S.view.max;
-    if (d.out) return { html: '<span class="chip">ไม่ส่งแข่ง ไม่พิมพ์ในใบรายงานตัว และไม่นับรายการ</span>', bad: false };
+  function slotByKey(k) { return S.slots.filter(function (s) { return s.key === k; })[0]; }
+  function slotInfo(s) {
+    var k = pkey(s.first, s.last), out = [], max = S.view.max, x = s.entry;
+    if (s.blank) return { html: x ? '<span class="chip">ไม่ส่ง ไม่พิมพ์ในใบรายงานตัว และไม่นับรายการ</span>' : '', bad: false };
     var others = [], confirmedOthers = [];
     S.view.events.forEach(function (e) {
       if (e.event === S.ev.event) return;
@@ -150,68 +160,77 @@
     if (bad) out.push('<span class="chip bad">ยืนยันครบ ' + max + ' รายการแล้ว: ' + esc(confirmedOthers.join(', ')) + '</span>');
     else out.push('<span class="chip' + (max && total > max ? ' warn' : '') + ' num">ลงแข่งรวม ' + total + ' รายการ' +
       (others.length ? ' (อีก: ' + esc(others.join(', ')) + ')' : '') + (max && total > max ? ' · เกิน ' + max + ' รายการ เปลี่ยนเป็นคนอื่นในบางรายการ' : '') + '</span>');
-    if (d.prefix !== x.oPrefix || norm(d.first) !== norm(x.oFirst) || norm(d.last) !== norm(x.oLast))
+    if (x && x.oFirst && (s.prefix !== x.oPrefix || norm(s.first) !== norm(x.oFirst) || norm(s.last) !== norm(x.oLast)))
       out.push('<span class="chip edit">ชื่อเดิม: ' + esc(x.oPrefix + x.oFirst + ' ' + x.oLast) + '</span>');
+    if (!x) out.push('<span class="chip edit">เพิ่มใหม่</span>');
     return { html: out.join(''), bad: bad };
   }
+  function slotLabel(i, size) {
+    if (size === 1) return 'นักกีฬา';
+    return i === size - 1 ? 'คนที่ ' + (i + 1) + ' (สำรอง)' : 'คนที่ ' + (i + 1);
+  }
   function renderEditor() {
-    var e = S.ev, ed = canEdit(), st = evStatus(e), tword = /คู่/.test(e.category) ? 'คู่ที่' : 'ทีมที่';
+    var e = S.ev, ed = canEdit(), st = evStatus(e), tw = tword(), size = e.size || 1, dis = ed ? '' : ' disabled';
     var head = e.confirmation ? '<div class="confirmed">ยืนยันแล้วเมื่อ ' + esc(thDateTime(e.confirmation.at)) + ' โดย ' + esc(e.confirmation.by) +
       ' โทร ' + esc(e.confirmation.phone) + (ed && e.deadline ? '<br>แก้ไขและยืนยันซ้ำได้จนถึง ' + esc(thDateTime(e.deadline)) : '') + '</div>' : '';
     if (!ed) head += '<div class="locked">ปิดรับยืนยันรายการนี้แล้วเมื่อ ' + esc(thDateTime(e.deadline)) + ' หากต้องแก้ไข ติดต่อเจ้าหน้าที่</div>';
     else if (e.closed) head += '<div class="locked">เลยเวลาปิดยืนยันแล้ว กำลังแก้ไขในฐานะเจ้าหน้าที่</div>';
-    var dis = ed ? '' : ' disabled';
-    var slots = '<div class="team"><div class="team-h" id="teamSum"></div>' + e.entries.map(function (x) {
-        var d = S.draft[x.id], cur = pkey(d.first, d.last);
-        return '<div class="slot pick" data-id="' + x.id + '">' +
-          '<label class="f">' + tword + '<select class="tm" id="t_' + x.id + '"' + dis + '>' +
-          ['1', '2'].map(function (t) { return '<option value="' + t + '"' + (d.team === t ? ' selected' : '') + '>' + tword + ' ' + t + '</option>'; }).join('') + '</select></label>' +
-          '<label class="f">นักกีฬา<select class="who" id="w_' + x.id + '"' + dis + '>' +
-          e.pool.map(function (p, i) {
-            return '<option value="' + i + '"' + (!d.out && pkey(p.first, p.last) === cur ? ' selected' : '') + '>' + esc(p.prefix + p.first + ' ' + p.last) + '</option>';
-          }).join('') + '<option value="out"' + (d.out ? ' selected' : '') + '>— ไม่ส่ง —</option></select></label>' +
-          '<div class="info"></div></div>';
-      }).join('') + '</div>';
+    var boxes = ['1', '2'].filter(function (t) { return S.shown[t]; }).map(function (t) {
+      var list = S.slots.filter(function (s) { return s.team === t; });
+      return '<div class="team"><div class="team-h">' + tw + ' ' + t + (size > 1 ? ' <span class="small" style="font-weight:400">(' + list.length + ' ช่อง' + (size > 1 ? ' รวมสำรอง' : '') + ')</span>' : '') + '</div>' +
+        list.map(function (s, i) {
+          var cur = pkey(s.first, s.last);
+          return '<div class="slot pick" data-k="' + s.key + '">' +
+            '<label class="f">' + slotLabel(i, size) + '<select class="who" id="w_' + s.key + '"' + dis + '>' +
+            '<option value=""' + (s.blank ? ' selected' : '') + '>— ว่าง / ไม่ส่ง —</option>' +
+            e.pool.map(function (p, j) {
+              return '<option value="' + j + '"' + (!s.blank && pkey(p.first, p.last) === cur ? ' selected' : '') + '>' + esc(p.prefix + p.first + ' ' + p.last) + '</option>';
+            }).join('') + '</select></label><div class="info"></div></div>';
+        }).join('') + '</div>';
+    }).join('');
+    var addBtn = ed && !S.shown['2'] ? '<button class="btn" id="addTeam" style="justify-self:start">+ เพิ่ม' + tw + ' 2</button>' : '';
     app.innerHTML = staffNote() + '<section class="card" style="display:grid;gap:14px">' +
       '<div class="row between"><div><div class="step">ขั้นที่ 3 จาก 3 · ' + esc(S.view.school) + '</div><h2>' + esc(e.short) + '</h2>' +
       '<div class="small muted">' + esc(e.event) + (e.startDate ? ' · แข่ง' + thDate(e.startDate, true) : '') + (e.startTime ? ' เริ่ม ' + esc(e.startTime) + ' น.' : '') + '</div></div>' +
       '<span class="pill ' + st.cls + '">' + st.text + '</span></div>' +
       '<button class="btn link" id="back" style="justify-self:start">‹ กลับไปรายการทั้งหมด</button>' + head +
-      '<div style="display:grid;gap:14px">' + slots + '</div>' +
+      '<div class="small muted" id="teamSum"></div>' +
+      '<div style="display:grid;gap:18px">' + boxes + '</div>' + addBtn +
       (ed ? '<div class="sticky-bar"><div id="errBox"></div><div class="form2">' +
         '<label class="f">ชื่อผู้ยืนยัน/แก้ไข (ผู้ควบคุมทีม)<input type="text" id="by" value="' + esc(C.store('ck_by') || '') + '" autocomplete="name"></label>' +
         '<label class="f">เบอร์โทรศัพท์<input type="tel" id="phone" value="' + esc(C.store('ck_phone') || '') + '" inputmode="numeric" autocomplete="tel" placeholder="08xxxxxxxx"></label></div>' +
         '<button class="btn primary" id="submit">' + (e.confirmation ? 'บันทึกและยืนยันอีกครั้ง' : 'ยืนยันรายชื่อ') + '</button></div>' : '') + '</section>';
     document.getElementById('back').onclick = function () { S.ev = null; renderEvents(); };
+    var add = document.getElementById('addTeam');
+    if (add) add.onclick = function () { keepForm(); S.shown['2'] = true; renderEditor(); };
     app.querySelectorAll('.slot select.who').forEach(function (sel) {
       sel.addEventListener('change', function () {
-        var id = sel.closest('.slot').getAttribute('data-id'), old = S.draft[id];
-        if (sel.value === 'out') { old.out = true; }
-        else { var p = S.ev.pool[+sel.value]; S.draft[id] = { team: old.team, prefix: p.prefix, first: p.first, last: p.last, out: false }; }
+        var s = slotByKey(sel.closest('.slot').getAttribute('data-k'));
+        if (sel.value === '') s.blank = true;
+        else { var p = e.pool[+sel.value]; s.prefix = p.prefix; s.first = p.first; s.last = p.last; s.blank = false; }
         updateSlots();
       });
     });
-    app.querySelectorAll('.slot select.tm').forEach(function (sel) {
-      sel.addEventListener('change', function () { S.draft[sel.closest('.slot').getAttribute('data-id')].team = sel.value; updateSlots(); });
-    });
     if (ed) document.getElementById('submit').onclick = submit;
-    updateSlots(); renderErrors(); window.scrollTo(0, 0);
+    updateSlots(); renderErrors();
+  }
+  function keepForm() {
+    var b = document.getElementById('by'), ph = document.getElementById('phone');
+    if (b) C.store('ck_by', b.value.trim()); if (ph) C.store('ck_phone', ph.value.trim());
   }
   function updateSlots() {
-    var keys = {};
-    S.ev.entries.forEach(function (x) { var d = S.draft[x.id], k = pkey(d.first, d.last); if (!d.out) keys[k] = (keys[k] || 0) + 1; });
+    var keys = {}, tw = tword(), cnt = { '1': 0, '2': 0 }, nout = 0;
+    S.slots.forEach(function (s) {
+      if (s.blank) { if (s.entry) nout++; return; }
+      var k = pkey(s.first, s.last); keys[k] = (keys[k] || 0) + 1; cnt[s.team]++;
+    });
     app.querySelectorAll('.slot').forEach(function (el) {
-      var x = S.ev.entries.filter(function (y) { return String(y.id) === el.getAttribute('data-id'); })[0];
-      var d = S.draft[x.id], info = slotInfo(x), dup = !d.out && keys[pkey(d.first, d.last)] > 1;
-      el.classList.toggle('over', !!info.bad); el.classList.toggle('dup', dup); el.classList.toggle('out', !!d.out);
-      var tm = el.querySelector('select.tm'); if (tm && canEdit()) tm.disabled = !!d.out;
+      var s = slotByKey(el.getAttribute('data-k')), info = slotInfo(s), dup = !s.blank && keys[pkey(s.first, s.last)] > 1;
+      el.classList.toggle('over', !!info.bad); el.classList.toggle('dup', dup); el.classList.toggle('out', !!s.blank);
       el.querySelector('.info').innerHTML = info.html + (dup ? '<span class="chip bad">ชื่อซ้ำในรายการนี้</span>' : '');
     });
-    var cnt = { '1': 0, '2': 0 }, tw = /คู่/.test(S.ev.category) ? 'คู่ที่' : 'ทีมที่';
-    var nout = 0;
-    S.ev.entries.forEach(function (x) { var d = S.draft[x.id]; if (d.out) { nout++; return; } cnt[d.team] = (cnt[d.team] || 0) + 1; });
     var sum = document.getElementById('teamSum');
-    if (sum) sum.textContent = tw + ' 1: ' + cnt['1'] + ' คน · ' + tw + ' 2: ' + cnt['2'] + ' คน' + (nout ? ' · ไม่ส่ง ' + nout + ' คน' : '');
+    if (sum) sum.textContent = 'ส่งแข่ง ' + tw + ' 1: ' + cnt['1'] + ' คน' + (S.shown['2'] ? ' · ' + tw + ' 2: ' + cnt['2'] + ' คน' : '') + (nout ? ' · ไม่ส่ง ' + nout + ' คน' : '');
   }
   function renderErrors() {
     var box = document.getElementById('errBox'); if (!box) return;
@@ -222,7 +241,8 @@
     var by = document.getElementById('by').value.trim(), phone = document.getElementById('phone').value.trim();
     C.store('ck_by', by); C.store('ck_phone', phone);
     var payload = { school: S.view.school, event: S.ev.event, by: by, phone: phone,
-      items: S.ev.entries.map(function (x) { var d = S.draft[x.id]; return { id: x.id, team: d.team, prefix: d.prefix, first: d.first, last: d.last, withdrawn: !!d.out }; }) };
+      items: S.slots.filter(function (s) { return s.id || !s.blank; })
+        .map(function (s) { return { id: s.id, team: s.team, prefix: s.prefix, first: s.first, last: s.last, withdrawn: !!s.blank }; }) };
     btn.disabled = true; btn.textContent = 'กำลังบันทึก…';
     C.http('POST', base + '/submit', payload).then(function (res) {
       if (!res.ok) { S.errors = res.errors; renderErrors(); btn.disabled = false; btn.textContent = 'ลองอีกครั้ง'; return; }

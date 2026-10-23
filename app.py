@@ -8,7 +8,7 @@ from checkin import create_app
 app = create_app()
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8000))
+    port = int(os.environ.get('PORT', 8080))
     with socket.socket() as s:
         if s.connect_ex(('127.0.0.1', port)) == 0:
             sys.exit(f'พอร์ต {port} มีโปรแกรมอื่นใช้อยู่ ลองใช้พอร์ตอื่น เช่น  PORT=8080 python3 app.py')

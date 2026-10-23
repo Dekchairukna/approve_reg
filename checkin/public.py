@@ -97,6 +97,11 @@ def submit(slug):
                              'WHERE id=? AND comp_id=?',
                              (nu['prefix'], nu['first'], nu['last'], nu['status'], nu['by'], nu['phone'], nu['at'],
                               nu['team'], eid, c['id']))
+            for nu in res['inserts']:
+                conn.execute('INSERT INTO entries (comp_id, event, school, level, team, prefix, first, last, status, '
+                             'by_name, phone, at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+                             (c['id'], payload['event'], school, next((e['level'] for e in events if e['event'] == payload['event']), ''),
+                              nu['team'], nu['prefix'], nu['first'], nu['last'], nu['status'], nu['by'], nu['phone'], nu['at']))
             cf = res['conf']
             conn.execute('INSERT INTO confs (comp_id, school, event, by_name, phone, at, count) VALUES (?,?,?,?,?,?,?) '
                          'ON CONFLICT (comp_id, school, event) DO UPDATE SET by_name=excluded.by_name, '

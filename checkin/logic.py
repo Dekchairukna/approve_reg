@@ -123,6 +123,7 @@ def school_view(entries, events, confs, school, now, max_events):
             pool=sorted(({'prefix': p, 'first': f, 'last': l} for p, f, l in pool.values()),
                         key=lambda x: (x['first'], x['last'])),
             event=ev['event'], short=ev['short'], level=ev['level'], category=ev['category'],
+            size=team_size(ev['category']),
             startDate=ev['startDate'], startTime=ev['startTime'], deadline=ev['deadline'],
             closed=is_closed(ev, now), confirmation=cm.get((school, ev['event'])),
             entries=[dict(id=e['id'], team=e['team'], teamLabel=team_label(e['team'], ev['category']),
@@ -132,8 +133,19 @@ def school_view(entries, events, confs, school, now, max_events):
     return dict(school=school, max=max_events, events=out)
 
 
+def team_size(category):
+    """จำนวนช่องต่อ 1 ทีม/คู่ (รวมตัวสำรอง)"""
+    if category in SINGLE_CATEGORIES:
+        return 1
+    if 'คู่' in category:
+        return 3          # ตัวจริง 2 + สำรอง 1
+    return 4              # ทีม 3 คน + สำรอง 1
+
+
 def apply_submit(entries, events, payload, now, staff, max_events):
-    """ตรวจข้อมูลที่ส่งมา คืน changes/logs/conf ถ้าผ่าน หรือ errors ถ้าไม่ผ่าน
+    """ตรวจข้อมูลที่ส่งมา คืน changes/inserts/logs/conf ถ้าผ่าน หรือ errors ถ้าไม่ผ่าน
+
+    items: [{id: รหัสเดิม หรือ None = ช่องใหม่, team: '1'|'2', prefix, first, last, withdrawn: ช่องว่าง/ไม่ส่ง}]
     staff = ชื่อผู้ใช้เจ้าหน้าที่ (แก้ได้แม้เลยเวลาปิด) หรือ None"""
     em = {e['event']: e for e in events}
     ev = em.get(payload.get('event'))
@@ -150,64 +162,79 @@ def apply_submit(entries, events, payload, now, staff, max_events):
     if not staff and is_closed(ev, now):
         errors.append(f"ปิดรับยืนยันรายการนี้แล้ว ({ev['deadline']} น.) ติดต่อเจ้าหน้าที่")
 
-    mine = [e for e in entries if e['school'] == school and e['event'] == ev['event']]
+    school_entries = [e for e in entries if e['school'] == school]
+    mine = {e['id']: e for e in school_entries if e['event'] == ev['event']}
     if not mine:
         errors.append('ไม่พบรายชื่อของโรงเรียนในรายการนี้')
-    try:
-        items = {int(it['id']): it for it in payload.get('items') or []}
-    except (KeyError, TypeError, ValueError):
-        return dict(ok=False, errors=['ข้อมูลไม่ถูกต้อง กรุณาโหลดหน้าใหม่'])
-    seen, changes, logs, ts = set(), [], [], stamp()
-    pool = roster(mine and [e for e in entries if e['school'] == school] or [], ev)
+    pool = roster(school_entries, ev)
+    size = team_size(ev['category'])
+    seen, changes, inserts, logs, ts = set(), [], [], [], stamp()
+    per_team, given = {}, set()
 
-    for e in mine:
-        it = items.get(e['id'])
-        if it is None:
-            errors.append('ข้อมูลไม่ครบ กรุณาโหลดหน้าใหม่')
+    for it in payload.get('items') or []:
+        try:
+            eid = int(it['id']) if it.get('id') not in (None, '', 'new') else None
+        except (TypeError, ValueError):
+            return dict(ok=False, errors=['ข้อมูลไม่ถูกต้อง กรุณาโหลดหน้าใหม่'])
+        e = mine.get(eid) if eid is not None else None
+        if eid is not None and e is None:
+            return dict(ok=False, errors=['ข้อมูลไม่ตรงกับในระบบ กรุณาโหลดหน้าใหม่'])
+        if eid is not None:
+            given.add(eid)
+        team = str(it.get('team') or (e['team'] if e else '1')).strip()
+        if team not in ('1', '2') and not (e and team == str(e['team'])):
+            errors.append('เลือกทีมที่ 1 หรือ 2 ให้ถูกต้อง')
             continue
-        out = bool(it.get('withdrawn'))   # เลือก "ไม่ส่ง" ในดรอปดาว
+        out = bool(it.get('withdrawn'))       # ช่องว่าง / ไม่ส่ง
+        if out and e is None:
+            continue                          # ช่องใหม่ที่เว้นว่างไว้: ไม่ต้องบันทึก
         p, f, l = clean(it.get('prefix'))[:20], clean(it.get('first'))[:80], clean(it.get('last'))[:80]
         if not out:
-            if not f or not l:
-                errors.append(f"กรุณากรอกชื่อ-นามสกุลให้ครบ ({team_label(e['team'], ev['category'])})")
-                continue
             k = pkey(school, f, l)
-            if k not in pool:
+            if not f or k not in pool:
                 errors.append(f'{p}{f} {l} ไม่อยู่ในรายชื่อที่โรงเรียนสมัครไว้ในรุ่นนี้ เลือกจากรายชื่อในช่องเท่านั้น')
                 continue
             p, f, l = pool[k]
             if k in seen:
                 errors.append(f'{p}{f} {l} มีชื่อซ้ำในรายการนี้')
             seen.add(k)
-            other = [x for x in entries if x['event'] != e['event'] and countable(x)
+            other = [x for x in school_entries if x['event'] != ev['event'] and countable(x)
                      and pkey(x['school'], x['first'], x['last']) == k]
             if max_events and len(other) + 1 > max_events:
                 names = ', '.join(em.get(x['event'], {}).get('short', x['event']) for x in other)
                 errors.append(f'{p}{f} {l} ยืนยันไปแล้ว {len(other)} รายการ ({names}) '
                               f'ยืนยันได้สูงสุด {max_events} รายการต่อคน')
-        team = str(it.get('team') or e['team']).strip()
-        if team not in ('1', '2', str(e['team'])):
-            errors.append('เลือกทีมที่ 1 หรือ 2 ให้ครบทุกช่อง')
+            per_team[team] = per_team.get(team, 0) + 1
+        label = team_label(team, ev['category'])
+        if e is None:
+            nu = dict(team=team, prefix=p, first=f, last=l, status=OK, by=by[:120], phone=phone, at=ts)
+            inserts.append(nu)
+            logs.append(dict(at=ts, school=school, event=ev['event'], entry_id=None, action='เพิ่มนักกีฬา',
+                             before='', after=f'{p}{f} {l} ({label}) [{OK}]', by=nu['by'], phone=phone, user=staff or ''))
             continue
         nu = dict(prefix=e['prefix'] if out else p, first=e['first'] if out else f,
                   last=e['last'] if out else l, status=OUT if out else OK, by=by[:120], phone=phone, at=ts, team=team)
         name_changed = (nu['prefix'], nu['first'], nu['last']) != (e['prefix'], e['first'], e['last'])
         team_changed = team != str(e['team'])
         if name_changed or team_changed or nu['status'] != e['status']:
-            tb, ta = team_label(e['team'], ev['category']), team_label(team, ev['category'])
             logs.append(dict(at=ts, school=school, event=e['event'], entry_id=e['id'],
                              action='ไม่ส่ง' if out else ('แก้ไขชื่อ' if name_changed else ('ระบุทีม' if team_changed else 'ยืนยัน')),
-                             before=f"{e['prefix']}{e['first']} {e['last']} ({tb}) [{e['status']}]",
-                             after=f"{nu['prefix']}{nu['first']} {nu['last']} ({ta}) [{nu['status']}]",
+                             before=f"{e['prefix']}{e['first']} {e['last']} ({team_label(e['team'], ev['category'])}) [{e['status']}]",
+                             after=f"{nu['prefix']}{nu['first']} {nu['last']} ({label}) [{nu['status']}]",
                              by=nu['by'], phone=phone, user=staff or ''))
         changes.append((e['id'], nu))
 
+    if mine and set(mine) - given:
+        errors.append('ข้อมูลไม่ครบ กรุณาโหลดหน้าใหม่')
+    for t, n in sorted(per_team.items()):
+        if t in ('1', '2') and n > size:
+            errors.append(f'{team_label(t, ev["category"])} ใส่ได้ไม่เกิน {size} คน (ตอนนี้ {n} คน)')
     errors = list(dict.fromkeys(errors))
     if errors:
         return dict(ok=False, errors=errors)
-    count = sum(1 for _, nu in changes if nu['status'] == OK)
+    count = sum(1 for _, nu in changes if nu['status'] == OK) + len(inserts)
     conf = dict(school=school, event=ev['event'], by=by[:120], phone=phone, at=ts, count=count)
-    return dict(ok=True, changes=changes, logs=logs, conf=conf)
+    return dict(ok=True, changes=changes, inserts=inserts, logs=logs, conf=conf)
 
 
 def overview(entries, events, confs, now, max_events):
