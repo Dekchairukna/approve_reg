@@ -120,7 +120,7 @@
     window.scrollTo(0, 0);
   }
   function staffNote() {
-    return S.staff ? '<div class="locked small">เข้าสู่ระบบเจ้าหน้าที่อยู่ แก้ไขได้แม้เลยเวลาปิดยืนยัน และการแก้ไขจะบันทึกชื่อบัญชีของคุณ</div>' : '';
+    return S.staff ? '<div class="locked small">เข้าสู่ระบบเจ้าหน้าที่อยู่ แก้ไขได้แม้เลยเวลาปิดยืนยัน ไม่ต้องกรอกชื่อ/เบอร์ และไม่แสดงว่าเจ้าหน้าที่เป็นผู้แก้</div>' : '';
   }
 
   /* ขั้นที่ 3: ยืนยัน/แก้ไขรายชื่อ — แบ่งเป็นกล่องตามทีม/คู่ แต่ละกล่องมีช่องตามจำนวนที่กำหนด (รวมตัวสำรอง) */
@@ -198,10 +198,10 @@
       '<button class="btn link" id="back" style="justify-self:start">‹ กลับไปรายการทั้งหมด</button>' + head +
       '<div class="small muted" id="teamSum"></div>' +
       '<div style="display:grid;gap:18px">' + boxes + '</div>' + addBtn +
-      (ed ? '<div class="sticky-bar"><div id="errBox"></div><div class="form2">' +
+      (ed ? '<div class="sticky-bar"><div id="errBox"></div>' + (S.staff ? '' : '<div class="form2">' +
         '<label class="f">ชื่อผู้ยืนยัน/แก้ไข (ผู้ควบคุมทีม)<input type="text" id="by" value="' + esc(C.store('ck_by') || '') + '" autocomplete="name"></label>' +
-        '<label class="f">เบอร์โทรศัพท์<input type="tel" id="phone" value="' + esc(C.store('ck_phone') || '') + '" inputmode="numeric" autocomplete="tel" placeholder="08xxxxxxxx"></label></div>' +
-        '<button class="btn primary" id="submit">' + (e.confirmation ? 'บันทึกและยืนยันอีกครั้ง' : 'ยืนยันรายชื่อ') + '</button></div>' : '') + '</section>';
+        '<label class="f">เบอร์โทรศัพท์<input type="tel" id="phone" value="' + esc(C.store('ck_phone') || '') + '" inputmode="numeric" autocomplete="tel" placeholder="08xxxxxxxx"></label></div>') +
+        '<button class="btn primary" id="submit">' + (S.staff ? 'บันทึกการแก้ไข' : e.confirmation ? 'บันทึกและยืนยันอีกครั้ง' : 'ยืนยันรายชื่อ') + '</button></div>' : '') + '</section>';
     document.getElementById('back').onclick = function () { S.ev = null; renderEvents(); };
     var add = document.getElementById('addTeam');
     if (add) add.onclick = function () { keepForm(); S.shown['2'] = true; renderEditor(); };
@@ -240,8 +240,9 @@
   }
   function submit() {
     var btn = document.getElementById('submit');
-    var by = document.getElementById('by').value.trim(), phone = document.getElementById('phone').value.trim();
-    C.store('ck_by', by); C.store('ck_phone', phone);
+    var bi = document.getElementById('by'), pi = document.getElementById('phone');
+    var by = bi ? bi.value.trim() : '', phone = pi ? pi.value.trim() : '';
+    if (bi) { C.store('ck_by', by); C.store('ck_phone', phone); }
     var payload = { school: S.view.school, event: S.ev.event, by: by, phone: phone,
       items: S.slots.filter(function (s) { return s.id || !s.blank; })
         .map(function (s) { return { id: s.id, team: s.team, prefix: s.prefix, first: s.first, last: s.last, withdrawn: !!s.blank }; }) };
@@ -249,7 +250,7 @@
     C.http('POST', base + '/submit', payload).then(function (res) {
       if (!res.ok) { S.errors = res.errors; renderErrors(); btn.disabled = false; btn.textContent = 'ลองอีกครั้ง'; return; }
       S.view = res.view; S.ev = null; S.errors = [];
-      renderEvents(); C.toast('ยืนยันรายชื่อแล้ว ' + res.conf.count + ' คน');
+      renderEvents(); C.toast(res.conf ? 'ยืนยันรายชื่อแล้ว ' + res.conf.count + ' คน' : 'บันทึกการแก้ไขแล้ว (' + res.count + ' คน)');
     }).catch(function (e) { S.errors = [errMsg(e)]; renderErrors(); btn.disabled = false; btn.textContent = 'ลองอีกครั้ง'; });
   }
 

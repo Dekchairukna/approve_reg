@@ -70,7 +70,7 @@ def submit(c, event_name, school='โรงเรียนเอ', swap=None):
     v = c.post('/api/c/test/school', json={'school': school}, headers=H).json
     ev = next(e for e in v['events'] if e['event'] == event_name)
     items = [dict(id=x['id'], prefix=x['prefix'], first=swap.get(x['first'], x['first']), last=x['last']) for x in ev['entries']]
-    return c.post('/api/c/test/submit', headers=H, json={'school': school, 'event': event_name, 'by': 'ครู', 'phone': '0812345678', 'items': items}).json
+    return c.application.test_client().post('/api/c/test/submit', headers=H, json={'school': school, 'event': event_name, 'by': 'ครู', 'phone': '0812345678', 'items': items}).json
 
 
 def test_csrf_header_required(client):
@@ -118,9 +118,16 @@ def test_deadline_blocks_public_but_not_staff(client):
     evs = client.get(f'/api/admin/competitions/{cid}', headers=H).json['events']
     client.post(f'/api/admin/competitions/{cid}/events', headers=H, json={'events': [
         dict(id=e['id'], short=e['short'], startDate='2020-01-02', startTime='08.30', deadline='2020-01-01 18:00') for e in evs]})
-    assert submit(client, 'เปตอง : เดี่ยว ประถมศึกษา บุคคล หญิง')['ok']   # เจ้าหน้าที่ยังแก้ได้
+    ev = 'เปตอง : เดี่ยว ประถมศึกษา บุคคล หญิง'
+    v = client.post('/api/c/test/school', json={'school': 'โรงเรียนเอ'}, headers=H).json
+    items = [dict(id=x['id'], prefix=x['prefix'], first=x['first'], last=x['last']) for x in next(e for e in v['events'] if e['event'] == ev)['entries']]
+    # เจ้าหน้าที่แก้ได้แม้ปิดแล้ว ไม่ต้องกรอกชื่อ/เบอร์ และไม่ทับการยืนยันของโรงเรียน
+    r = client.post('/api/c/test/submit', headers=H, json={'school': 'โรงเรียนเอ', 'event': ev, 'items': items}).json
+    assert r['ok'] and r['conf'] is None and r['count'] == 1
+    cf = next(e for e in r['view']['events'] if e['event'] == ev)['confirmation']
+    assert cf['auto'] and 'ครู' not in (cf['by'] or '')
     client.post('/api/auth/logout', headers=H)
-    r = submit(client, 'เปตอง : เดี่ยว ประถมศึกษา บุคคล หญิง')
+    r = submit(client, ev)
     assert not r['ok'] and 'ปิดรับยืนยัน' in r['errors'][0]
 
 
@@ -180,12 +187,12 @@ def test_choose_team_number(client):
     v = client.post('/api/c/test/school', json={'school': 'โรงเรียนเอ'}, headers=H).json
     ev = next(e for e in v['events'] if e['short'] == 'เดี่ยวชาย')
     items = [dict(id=x['id'], team=str(i + 1), prefix=x['prefix'], first=x['first'], last=x['last']) for i, x in enumerate(ev['entries'])]
-    r = client.post('/api/c/test/submit', headers=H, json={'school': 'โรงเรียนเอ', 'event': ev['event'], 'by': 'ครู', 'phone': '0812345678', 'items': items}).json
+    r = client.application.test_client().post('/api/c/test/submit', headers=H, json={'school': 'โรงเรียนเอ', 'event': ev['event'], 'by': 'ครู', 'phone': '0812345678', 'items': items}).json
     assert r['ok']
     labels = [x['teamLabel'] for x in next(e for e in r['view']['events'] if e['short'] == 'เดี่ยวชาย')['entries']]
     assert labels == ['ทีมที่ 1', 'ทีมที่ 2']
     items[0]['team'] = '5'
-    r = client.post('/api/c/test/submit', headers=H, json={'school': 'โรงเรียนเอ', 'event': ev['event'], 'by': 'ครู', 'phone': '0812345678', 'items': items}).json
+    r = client.application.test_client().post('/api/c/test/submit', headers=H, json={'school': 'โรงเรียนเอ', 'event': ev['event'], 'by': 'ครู', 'phone': '0812345678', 'items': items}).json
     assert not r['ok']
     d = client.post(f'/api/admin/competitions/{cid}/print', headers=H, json={}).json
     assert [row['teamLabel'] for row in d['pages'][0]['blocks'][0]['rows']] == ['ทีมที่ 1', 'ทีมที่ 2']
@@ -197,7 +204,7 @@ def test_not_sending_athlete(client):
     ev = next(e for e in v['events'] if e['short'] == 'คู่ชาย')
     items = [dict(id=x['id'], team='1', prefix=x['prefix'], first=x['first'], last=x['last'], withdrawn=(i == 1))
              for i, x in enumerate(ev['entries'])]
-    r = client.post('/api/c/test/submit', headers=H, json={'school': 'โรงเรียนเอ', 'event': ev['event'], 'by': 'ครู', 'phone': '0812345678', 'items': items}).json
+    r = client.application.test_client().post('/api/c/test/submit', headers=H, json={'school': 'โรงเรียนเอ', 'event': ev['event'], 'by': 'ครู', 'phone': '0812345678', 'items': items}).json
     assert r['ok'] and r['conf']['count'] == 1
     d = client.post(f'/api/admin/competitions/{cid}/print', headers=H, json={}).json
     assert len(d['pages'][0]['blocks'][0]['rows']) == 1
@@ -213,7 +220,7 @@ def test_team_slots_add_new_athlete(client):
     items.append(dict(id=None, team='1', prefix='ด.ช.', first='ขยัน', last='ทดสอบ'))          # สำรองคนที่ 3 จากรายชื่อรุ่นเดียวกัน
     items.append(dict(id=None, team='2', prefix='', first='', last='', withdrawn=True))       # ช่องว่าง: ไม่บันทึก
     body = {'school': 'โรงเรียนเอ', 'event': ev['event'], 'by': 'ครู', 'phone': '0812345678', 'items': items}
-    r = client.post('/api/c/test/submit', headers=H, json=body).json
+    r = client.application.test_client().post('/api/c/test/submit', headers=H, json=body).json
     assert r['ok'] and r['conf']['count'] == 3
     ev2 = next(e for e in r['view']['events'] if e['short'] == 'คู่ชาย')
     assert len(ev2['entries']) == 3
@@ -221,7 +228,7 @@ def test_team_slots_add_new_athlete(client):
     items2 = [dict(id=x['id'], team='1', prefix=x['prefix'], first=x['first'], last=x['last']) for x in ev2['entries']]
     items2.append(dict(id=None, team='1', prefix='ด.ช.', first='สาม', last='ทดสอบ'))
     body['items'] = items2
-    r = client.post('/api/c/test/submit', headers=H, json=body).json
+    r = client.application.test_client().post('/api/c/test/submit', headers=H, json=body).json
     assert not r['ok'] and 'ไม่เกิน 3 คน' in ' '.join(r['errors'])
     d = client.post(f'/api/admin/competitions/{cid}/print', headers=H, json={}).json
     assert len(d['pages'][0]['blocks'][0]['rows']) == 3

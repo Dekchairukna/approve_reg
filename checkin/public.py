@@ -105,7 +105,10 @@ def submit(slug):
                              (c['id'], payload['event'], school, next((e['level'] for e in events if e['event'] == payload['event']), ''),
                               nu['team'], nu['prefix'], nu['first'], nu['last'], nu['status'], nu['by'], nu['phone'], nu['at']))
             cf = res['conf']
-            conn.execute('INSERT INTO confs (comp_id, school, event, by_name, phone, at, count) VALUES (?,?,?,?,?,?,?) '
+            if not cf:  # เจ้าหน้าที่แก้: คงผู้ยืนยันเดิม ปรับแค่จำนวนคน
+                conn.execute('UPDATE confs SET count=? WHERE comp_id=? AND school=? AND event=?',
+                             (res['count'], c['id'], school, payload['event']))
+            else: conn.execute('INSERT INTO confs (comp_id, school, event, by_name, phone, at, count) VALUES (?,?,?,?,?,?,?) '
                          'ON CONFLICT (comp_id, school, event) DO UPDATE SET by_name=excluded.by_name, '
                          'phone=excluded.phone, at=excluded.at, count=excluded.count',
                          (c['id'], cf['school'], cf['event'], cf['by'], cf['phone'], cf['at'], cf['count']))
@@ -116,4 +119,4 @@ def submit(slug):
     events = store.load_events(c['id'])
     entries, confs = logic.apply_auto(store.load_entries(c['id'], school), events, store.load_confs(c['id']), logic.now_bkk())
     view = logic.school_view(entries, events, confs, school, logic.now_bkk(), c['max_events'])
-    return jsonify(ok=True, conf=res['conf'], view=view)
+    return jsonify(ok=True, conf=res['conf'], count=res['count'], view=view)

@@ -171,7 +171,8 @@ def apply_submit(entries, events, payload, now, staff, max_events):
     """ตรวจข้อมูลที่ส่งมา คืน changes/inserts/logs/conf ถ้าผ่าน หรือ errors ถ้าไม่ผ่าน
 
     items: [{id: รหัสเดิม หรือ None = ช่องใหม่, team: '1'|'2', prefix, first, last, withdrawn: ช่องว่าง/ไม่ส่ง}]
-    staff = ชื่อผู้ใช้เจ้าหน้าที่ (แก้ได้แม้เลยเวลาปิด) หรือ None"""
+    staff = ชื่อผู้ใช้เจ้าหน้าที่ (แก้ได้แม้เลยเวลาปิด) หรือ None
+    เจ้าหน้าที่แก้: ไม่ต้องกรอกชื่อ/เบอร์ ไม่นับเป็นการยืนยันของโรงเรียน (conf=None) และคงชื่อผู้ยืนยันเดิมไว้"""
     em = {e['event']: e for e in events}
     ev = em.get(payload.get('event'))
     if not ev:
@@ -180,9 +181,11 @@ def apply_submit(entries, events, payload, now, staff, max_events):
     by = clean(payload.get('by'))
     phone = re.sub(r'\D', '', str(payload.get('phone') or ''))
     errors = []
-    if not by:
+    if staff:
+        by, phone = '', ''
+    elif not by:
         errors.append('กรุณากรอกชื่อผู้ยืนยัน/แก้ไข')
-    if not re.fullmatch(r'0\d{8,9}', phone):
+    if not staff and not re.fullmatch(r'0\d{8,9}', phone):
         errors.append('เบอร์โทรต้องเป็นตัวเลข 9–10 หลัก ขึ้นต้นด้วย 0')
     if not staff and is_closed(ev, now):
         errors.append(f"ปิดรับยืนยันรายการนี้แล้ว ({ev['deadline']} น.) ติดต่อเจ้าหน้าที่")
@@ -239,6 +242,8 @@ def apply_submit(entries, events, payload, now, staff, max_events):
             continue
         nu = dict(prefix=e['prefix'] if out else p, first=e['first'] if out else f,
                   last=e['last'] if out else l, status=OUT if out else OK, by=by[:120], phone=phone, at=ts, team=team)
+        if staff:  # ไม่ทับชื่อผู้ยืนยันเดิมของโรงเรียน
+            nu.update(by=e['by'] or '', phone=e['phone'] or '', at=e['at'] or '')
         name_changed = (nu['prefix'], nu['first'], nu['last']) != (e['prefix'], e['first'], e['last'])
         team_changed = team != str(e['team'])
         if name_changed or team_changed or nu['status'] != e['status']:
@@ -258,8 +263,8 @@ def apply_submit(entries, events, payload, now, staff, max_events):
     if errors:
         return dict(ok=False, errors=errors)
     count = sum(1 for _, nu in changes if nu['status'] == OK) + len(inserts)
-    conf = dict(school=school, event=ev['event'], by=by[:120], phone=phone, at=ts, count=count)
-    return dict(ok=True, changes=changes, inserts=inserts, logs=logs, conf=conf)
+    conf = None if staff else dict(school=school, event=ev['event'], by=by[:120], phone=phone, at=ts, count=count)
+    return dict(ok=True, changes=changes, inserts=inserts, logs=logs, conf=conf, count=count)
 
 
 def overview(entries, events, confs, now, max_events):
