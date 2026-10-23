@@ -52,7 +52,7 @@ def team_label(team, category):
         if category in SINGLE_CATEGORIES:
             return 'บุคคล'
         return 'ไม่ระบุทีม' if 'ทีม' in category else 'ไม่ระบุคู่'
-    return ('ทีมที่ ' if 'ทีม' in category else 'คู่ที่ ') + str(team)
+    return ('คู่ที่ ' if 'คู่' in category else 'ทีมที่ ') + str(team)
 
 
 def countable(e):
@@ -185,14 +185,20 @@ def apply_submit(entries, events, payload, now, staff, max_events):
                 names = ', '.join(em.get(x['event'], {}).get('short', x['event']) for x in other)
                 errors.append(f'{p}{f} {l} ยืนยันไปแล้ว {len(other)} รายการ ({names}) '
                               f'ยืนยันได้สูงสุด {max_events} รายการต่อคน')
+        team = str(it.get('team') or e['team']).strip()
+        if team not in ('1', '2', str(e['team'])):
+            errors.append('เลือกทีมที่ 1 หรือ 2 ให้ครบทุกช่อง')
+            continue
         nu = dict(prefix=e['prefix'] if out else p, first=e['first'] if out else f,
-                  last=e['last'] if out else l, status=OUT if out else OK, by=by[:120], phone=phone, at=ts)
+                  last=e['last'] if out else l, status=OUT if out else OK, by=by[:120], phone=phone, at=ts, team=team)
         name_changed = (nu['prefix'], nu['first'], nu['last']) != (e['prefix'], e['first'], e['last'])
-        if name_changed or nu['status'] != e['status']:
+        team_changed = team != str(e['team'])
+        if name_changed or team_changed or nu['status'] != e['status']:
+            tb, ta = team_label(e['team'], ev['category']), team_label(team, ev['category'])
             logs.append(dict(at=ts, school=school, event=e['event'], entry_id=e['id'],
-                             action='ถอนตัว' if out else ('แก้ไขชื่อ' if name_changed else 'ยืนยัน'),
-                             before=f"{e['prefix']}{e['first']} {e['last']} [{e['status']}]",
-                             after=f"{nu['prefix']}{nu['first']} {nu['last']} [{nu['status']}]",
+                             action='ถอนตัว' if out else ('แก้ไขชื่อ' if name_changed else ('ระบุทีม' if team_changed else 'ยืนยัน')),
+                             before=f"{e['prefix']}{e['first']} {e['last']} ({tb}) [{e['status']}]",
+                             after=f"{nu['prefix']}{nu['first']} {nu['last']} ({ta}) [{nu['status']}]",
                              by=nu['by'], phone=phone, user=staff or ''))
         changes.append((e['id'], nu))
 

@@ -93,10 +93,10 @@ def submit(slug):
             return jsonify(res)
         with conn:
             for eid, nu in res['changes']:
-                conn.execute('UPDATE entries SET prefix=?, first=?, last=?, status=?, by_name=?, phone=?, at=? '
+                conn.execute('UPDATE entries SET prefix=?, first=?, last=?, status=?, by_name=?, phone=?, at=?, team=? '
                              'WHERE id=? AND comp_id=?',
                              (nu['prefix'], nu['first'], nu['last'], nu['status'], nu['by'], nu['phone'], nu['at'],
-                              eid, c['id']))
+                              nu['team'], eid, c['id']))
             cf = res['conf']
             conn.execute('INSERT INTO confs (comp_id, school, event, by_name, phone, at, count) VALUES (?,?,?,?,?,?,?) '
                          'ON CONFLICT (comp_id, school, event) DO UPDATE SET by_name=excluded.by_name, '

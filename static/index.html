@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>ระบบยืนยันรายชื่อนักกีฬา</title>
+<title>ยืนยันรายชื่อนักกีฬา</title>
 <!--og-->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Kanit:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&family=Sarabun:wght@400;600;700&display=swap">
@@ -13,7 +13,7 @@
 <header class="band">
   <div class="wrap">
     <div class="band-top">
-      <div class="brand" id="brand"><div class="logo-ph"></div><div><div class="games">&nbsp;</div><h1>ระบบยืนยันรายชื่อนักกีฬา</h1></div></div>
+      <div class="brand" id="brand"><div class="logo-ph"></div><div><div class="games">&nbsp;</div><h1>ยืนยันรายชื่อนักกีฬา</h1></div></div>
       <div class="staffbar" id="staffbar"></div>
     </div>
     <div class="deadlines" id="deadlines"></div>
@@ -126,7 +126,12 @@
   function openEvent(name) {
     S.ev = S.view.events.filter(function (x) { return x.event === name; })[0];
     S.errors = []; S.draft = {};
-    S.ev.entries.forEach(function (x) { S.draft[x.id] = { prefix: x.prefix, first: x.first, last: x.last }; });
+    var n = S.ev.entries.length, single = /เดี่ยว|Shooting|บุคคล/.test(S.ev.category), size = /ทีม/.test(S.ev.category) ? 4 : 3;
+    S.ev.entries.forEach(function (x, i) {
+      // ทีมที่: ใช้ตามไฟล์ถ้ามี ไม่มี (999) ให้เดาไว้ก่อน แล้วให้ผู้ยืนยันเลือกเอง
+      var t = (x.team === '1' || x.team === '2') ? x.team : single ? String(Math.min(i + 1, 2)) : (n <= size || i < Math.ceil(n / 2) ? '1' : '2');
+      S.draft[x.id] = { team: t, prefix: x.prefix, first: x.first, last: x.last };
+    });
     renderEditor();
   }
   function canEdit() { return !S.ev.closed || !!S.staff; }
@@ -149,24 +154,23 @@
     return { html: out.join(''), bad: bad };
   }
   function renderEditor() {
-    var e = S.ev, ed = canEdit(), teams = {}, order = [], st = evStatus(e);
-    e.entries.forEach(function (x) { if (!teams[x.teamLabel]) { teams[x.teamLabel] = []; order.push(x.teamLabel); } teams[x.teamLabel].push(x); });
+    var e = S.ev, ed = canEdit(), st = evStatus(e), tword = /คู่/.test(e.category) ? 'คู่ที่' : 'ทีมที่';
     var head = e.confirmation ? '<div class="confirmed">ยืนยันแล้วเมื่อ ' + esc(thDateTime(e.confirmation.at)) + ' โดย ' + esc(e.confirmation.by) +
       ' โทร ' + esc(e.confirmation.phone) + (ed && e.deadline ? '<br>แก้ไขและยืนยันซ้ำได้จนถึง ' + esc(thDateTime(e.deadline)) : '') + '</div>' : '';
     if (!ed) head += '<div class="locked">ปิดรับยืนยันรายการนี้แล้วเมื่อ ' + esc(thDateTime(e.deadline)) + ' หากต้องแก้ไข ติดต่อเจ้าหน้าที่</div>';
     else if (e.closed) head += '<div class="locked">เลยเวลาปิดยืนยันแล้ว กำลังแก้ไขในฐานะเจ้าหน้าที่</div>';
     var dis = ed ? '' : ' disabled';
-    var slots = order.map(function (t) {
-      return '<div class="team"><div class="team-h">' + esc(t) + '</div>' + teams[t].map(function (x) {
+    var slots = '<div class="team"><div class="team-h" id="teamSum"></div>' + e.entries.map(function (x) {
         var d = S.draft[x.id], cur = pkey(d.first, d.last);
         return '<div class="slot pick" data-id="' + x.id + '">' +
+          '<label class="f">' + tword + '<select class="tm" id="t_' + x.id + '"' + dis + '>' +
+          ['1', '2'].map(function (t) { return '<option value="' + t + '"' + (d.team === t ? ' selected' : '') + '>' + tword + ' ' + t + '</option>'; }).join('') + '</select></label>' +
           '<label class="f">นักกีฬา<select class="who" id="w_' + x.id + '"' + dis + '>' +
           e.pool.map(function (p, i) {
             return '<option value="' + i + '"' + (pkey(p.first, p.last) === cur ? ' selected' : '') + '>' + esc(p.prefix + p.first + ' ' + p.last) + '</option>';
           }).join('') + '</select></label>' +
           '<div class="info"></div></div>';
       }).join('') + '</div>';
-    }).join('');
     app.innerHTML = staffNote() + '<section class="card" style="display:grid;gap:14px">' +
       '<div class="row between"><div><div class="step">ขั้นที่ 3 จาก 3 · ' + esc(S.view.school) + '</div><h2>' + esc(e.short) + '</h2>' +
       '<div class="small muted">' + esc(e.event) + (e.startDate ? ' · แข่ง' + thDate(e.startDate, true) : '') + (e.startTime ? ' เริ่ม ' + esc(e.startTime) + ' น.' : '') + '</div></div>' +
@@ -181,9 +185,12 @@
     app.querySelectorAll('.slot select.who').forEach(function (sel) {
       sel.addEventListener('change', function () {
         var id = sel.closest('.slot').getAttribute('data-id'), p = S.ev.pool[+sel.value];
-        S.draft[id] = { prefix: p.prefix, first: p.first, last: p.last };
+        S.draft[id] = { team: S.draft[id].team, prefix: p.prefix, first: p.first, last: p.last };
         updateSlots();
       });
+    });
+    app.querySelectorAll('.slot select.tm').forEach(function (sel) {
+      sel.addEventListener('change', function () { S.draft[sel.closest('.slot').getAttribute('data-id')].team = sel.value; updateSlots(); });
     });
     if (ed) document.getElementById('submit').onclick = submit;
     updateSlots(); renderErrors(); window.scrollTo(0, 0);
@@ -197,6 +204,10 @@
       el.classList.toggle('over', !!info.bad); el.classList.toggle('dup', dup);
       el.querySelector('.info').innerHTML = info.html + (dup ? '<span class="chip bad">ชื่อซ้ำในรายการนี้</span>' : '');
     });
+    var cnt = { '1': 0, '2': 0 }, tw = /คู่/.test(S.ev.category) ? 'คู่ที่' : 'ทีมที่';
+    S.ev.entries.forEach(function (x) { cnt[S.draft[x.id].team] = (cnt[S.draft[x.id].team] || 0) + 1; });
+    var sum = document.getElementById('teamSum');
+    if (sum) sum.textContent = tw + ' 1: ' + cnt['1'] + ' คน · ' + tw + ' 2: ' + cnt['2'] + ' คน';
   }
   function renderErrors() {
     var box = document.getElementById('errBox'); if (!box) return;
@@ -207,7 +218,7 @@
     var by = document.getElementById('by').value.trim(), phone = document.getElementById('phone').value.trim();
     C.store('ck_by', by); C.store('ck_phone', phone);
     var payload = { school: S.view.school, event: S.ev.event, by: by, phone: phone,
-      items: S.ev.entries.map(function (x) { var d = S.draft[x.id]; return { id: x.id, prefix: d.prefix, first: d.first, last: d.last }; }) };
+      items: S.ev.entries.map(function (x) { var d = S.draft[x.id]; return { id: x.id, team: d.team, prefix: d.prefix, first: d.first, last: d.last }; }) };
     btn.disabled = true; btn.textContent = 'กำลังบันทึก…';
     C.http('POST', base + '/submit', payload).then(function (res) {
       if (!res.ok) { S.errors = res.errors; renderErrors(); btn.disabled = false; btn.textContent = 'ลองอีกครั้ง'; return; }

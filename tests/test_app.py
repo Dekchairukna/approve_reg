@@ -173,3 +173,19 @@ def test_backup_and_restore_on_fresh_install(client, tmp_path):
     fresh.post('/api/auth/logout', headers=H)
     r = fresh.post('/api/auth/restore', headers=H, content_type='multipart/form-data', data={'file': (io.BytesIO(data), 'checkin.db')})
     assert r.status_code == 403
+
+
+def test_choose_team_number(client):
+    cid = setup_comp(client)
+    v = client.post('/api/c/test/school', json={'school': 'โรงเรียนเอ'}, headers=H).json
+    ev = next(e for e in v['events'] if e['short'] == 'เดี่ยวชาย')
+    items = [dict(id=x['id'], team=str(i + 1), prefix=x['prefix'], first=x['first'], last=x['last']) for i, x in enumerate(ev['entries'])]
+    r = client.post('/api/c/test/submit', headers=H, json={'school': 'โรงเรียนเอ', 'event': ev['event'], 'by': 'ครู', 'phone': '0812345678', 'items': items}).json
+    assert r['ok']
+    labels = [x['teamLabel'] for x in next(e for e in r['view']['events'] if e['short'] == 'เดี่ยวชาย')['entries']]
+    assert labels == ['ทีมที่ 1', 'ทีมที่ 2']
+    items[0]['team'] = '5'
+    r = client.post('/api/c/test/submit', headers=H, json={'school': 'โรงเรียนเอ', 'event': ev['event'], 'by': 'ครู', 'phone': '0812345678', 'items': items}).json
+    assert not r['ok']
+    d = client.post(f'/api/admin/competitions/{cid}/print', headers=H, json={}).json
+    assert [row['teamLabel'] for row in d['pages'][0]['blocks'][0]['rows']] == ['ทีมที่ 1', 'ทีมที่ 2']
