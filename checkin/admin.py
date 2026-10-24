@@ -12,6 +12,7 @@ from .db import get_db
 from .importer import ImportError_, import_rows, read_excel
 
 bp = Blueprint('admin', __name__)
+LEVEL_SHORT = {'ประถมศึกษา': 'ประถม', 'มัธยมศึกษาตอนต้น': 'ม.ต้น', 'มัธยมศึกษาตอนปลาย': 'ม.ปลาย'}
 LOGO_TYPES = {'.png': 'png', '.jpg': 'jpg', '.jpeg': 'jpg', '.webp': 'webp', '.gif': 'gif'}
 
 
@@ -235,6 +236,51 @@ def checkin_list(cid):
                           if (e['school'], e['event']) not in confirmed})
     return jsonify(rows=out, events=names,
                    unconfirmed=[dict(school=s, short=sh, level=lv) for s, sh, lv in unconfirmed])
+
+
+@bp.get('/api/admin/competitions/<int:cid>/checkin-report.xlsx')
+@login_required()
+def checkin_report(cid):
+    """รายงานการรายงานตัว แยกตามรายการ: ชื่อ โรงเรียน ทีม เวลา (มาแล้วเรียงตามเวลา ตามด้วยยังไม่มา)"""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+    c = _comp_or_404(cid)
+    want = set(request.args.getlist('event'))
+    entries, events, _ = store.load_all(cid)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'รายงานตัว'
+    ws.append([c['name']])
+    ws['A1'].font = Font(bold=True, size=14)
+    ws.append([f'พิมพ์เมื่อ {logic.now_bkk():%Y-%m-%d %H:%M} น.'])
+    head = ['ที่', 'ชื่อ-นามสกุล', 'โรงเรียน', 'ทีม/คู่', 'เวลารายงานตัว', 'วันที่', 'ผู้รับรายงานตัว']
+    for ev in events:
+        if want and ev['event'] not in want:
+            continue
+        rows = [e for e in entries if e['event'] == ev['event'] and e['status'] == logic.OK]
+        if not rows:
+            continue
+        rows.sort(key=lambda e: (0, e['checkinAt']) if e['checkinAt'] else (1, e['school'] + e['first'] + e['last']))
+        n = sum(1 for e in rows if e['checkinAt'])
+        ws.append([])
+        ws.append([f"{LEVEL_SHORT.get(ev['level'], ev['level'])} · {ev['short']}  ({ev['event']})"
+                   + (f"  แข่ง {ev['startDate']}" if ev['startDate'] else '') + f"  —  มา {n}/{len(rows)} คน"])
+        ws.cell(ws.max_row, 1).font = Font(bold=True, size=12)
+        ws.append(head)
+        for cell in ws[ws.max_row]:
+            cell.font = Font(bold=True)
+            cell.fill = PatternFill('solid', fgColor='EEEEEE')
+        for i, e in enumerate(rows, 1):
+            at = e['checkinAt'] or ''
+            ws.append([i, f"{e['prefix']}{e['first']} {e['last']}", e['school'], logic.team_label(e['team'], ev['category']),
+                       at[11:16] if at else 'ยังไม่มา', at[:10], e['checkinBy'] or ''])
+    for col, w in zip('ABCDEFG', (6, 32, 40, 14, 14, 12, 18)):
+        ws.column_dimensions[col].width = w
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return send_file(buf, as_attachment=True, download_name=f"รายงานตัว_{c['slug']}_{logic.now_bkk():%Y%m%d_%H%M}.xlsx",
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
 @bp.post('/api/admin/competitions/<int:cid>/checkin')

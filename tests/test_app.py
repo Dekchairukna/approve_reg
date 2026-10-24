@@ -288,3 +288,18 @@ def test_rename_athlete_and_roster_export(client):
     ws = load_workbook(io.BytesIO(x.data)).active
     vals = [row[11] for row in ws.iter_rows(min_row=2, values_only=True)]
     assert vals == ['ด.ช.หนึ่งเดียว ทดสอบ', 'ด.ช.สอง ทดสอบ']
+
+
+def test_checkin_report_excel(client):
+    from openpyxl import load_workbook
+    cid = setup_comp(client)
+    ev = 'เปตอง : ประถมศึกษา คู่ ชาย'
+    assert submit(client, ev)['ok']
+    rows = client.get(f'/api/admin/competitions/{cid}/checkin?event=' + ev, headers=H).json['rows']
+    client.post(f'/api/admin/competitions/{cid}/checkin', headers=H, json={'ids': [rows[1]['id']], 'present': True})
+    r = client.get(f'/api/admin/competitions/{cid}/checkin-report.xlsx?event=' + ev)
+    assert r.status_code == 200
+    vals = [[c for c in row] for row in load_workbook(io.BytesIO(r.data)).active.iter_rows(values_only=True)]
+    data = [v for v in vals if isinstance(v[0], int)]
+    assert len(data) == 2 and data[0][1] == rows[1]['name'] and ':' in data[0][4] and data[1][4] == 'ยังไม่มา'
+    assert any('มา 1/2' in str(v[0]) for v in vals)

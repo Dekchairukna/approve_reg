@@ -296,16 +296,17 @@
     '@media print{body{background:#fff}.bar{display:none}.sheets{display:block;padding:0}.sheet{box-shadow:none;width:auto;padding:0;page-break-after:always;break-after:page}' +
     '.sheet:last-child{page-break-after:auto;break-after:auto}.blk.pb{break-before:page;page-break-before:always;border-top:0;margin-top:0;padding-top:0}' +
     'th{-webkit-print-color-adjust:exact;print-color-adjust:exact}}';
-  function openPrintWindow() {
-    if (!A.printHtml) { C.toast('กด "สร้างใบรายงานตัว" ก่อน'); return; }
+  function openPrintWindow(html, title) {
+    html = typeof html === 'string' ? html : A.printHtml;
+    if (!html) { C.toast('กด "สร้างใบรายงานตัว" ก่อน'); return; }
     var w = null;
     try { w = window.open('', '_blank'); } catch (e) { w = null; }
     if (!w) { try { window.print(); } catch (e) { C.toast('กด ⌘P / Ctrl+P เพื่อพิมพ์'); } return; }
     w.document.open();
-    w.document.write('<!doctype html><html lang="th"><head><meta charset="utf-8"><title>ใบรายงานตัวนักกีฬา</title>' +
+    w.document.write('<!doctype html><html lang="th"><head><meta charset="utf-8"><title>' + esc(title || 'ใบรายงานตัวนักกีฬา') + '</title>' +
       '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap">' +
       '<style>' + PRINT_CSS + '</style></head><body><div class="bar"><button onclick="window.print()">พิมพ์ / บันทึกเป็น PDF</button>' +
-      '<span>ตั้งค่ากระดาษ A4 · ถ้าไม่ขึ้นหน้าต่างพิมพ์ กด ⌘P หรือ Ctrl+P</span></div><div class="sheets">' + A.printHtml + '</div>' +
+      '<span>ตั้งค่ากระดาษ A4 · ถ้าไม่ขึ้นหน้าต่างพิมพ์ กด ⌘P หรือ Ctrl+P</span></div><div class="sheets">' + html + '</div>' +
       '<script>window.addEventListener("load",function(){setTimeout(function(){window.print()},600)})<\/script></body></html>');
     w.document.close();
   }
@@ -391,8 +392,15 @@
       '<div class="row"><input type="search" id="ckQ" placeholder="ค้นหาชื่อนักกีฬาหรือโรงเรียน" style="flex:1;min-width:180px">' +
       '<div class="ck-filter" role="group">' + [['all', 'ทั้งหมด'], ['wait', 'ยังไม่มา'], ['done', 'มาแล้ว']].map(function (f) {
         return '<button data-f="' + f[0] + '" aria-pressed="' + (CK.filter === f[0]) + '">' + f[1] + '</button>'; }).join('') + '</div></div>' +
+      '<div class="row"><button class="btn" id="ckRep">พิมพ์รายงานการรายงานตัว</button><button class="btn" id="ckXlsx">ดาวน์โหลด Excel</button>' +
+      '<span class="small muted">แยกตามรายการ: ชื่อ · โรงเรียน · เวลาที่มารายงานตัว (ตามรายการที่เลือกด้านบน)</span></div>' +
       '<div id="ckSum"></div><div id="ckList"><div class="loading">กำลังโหลด…</div></div></div>';
     drawPicker();
+    document.getElementById('ckRep').onclick = printCheckinReport;
+    document.getElementById('ckXlsx').onclick = function () {
+      if (!CK.sel.length) { C.toast('เลือกรายการก่อน'); return; }
+      location.href = '/api/admin/competitions/' + A.comp.id + '/checkin-report.xlsx?' + CK.sel.map(function (n) { return 'event=' + encodeURIComponent(n); }).join('&');
+    };
     document.getElementById('ckQ').oninput = function () { CK.q = this.value; drawCheckin(); };
     tabEl().querySelectorAll('.ck-filter button').forEach(function (b) {
       b.onclick = function () { CK.filter = b.getAttribute('data-f'); tabEl().querySelectorAll('.ck-filter button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); drawCheckin(); };
@@ -493,6 +501,33 @@
         }).catch(function (e) { b.disabled = false; fail(e); });
       };
     });
+  }
+
+  /* รายงานการรายงานตัว แยกตามรายการ: มาแล้วเรียงตามเวลา ตามด้วยยังไม่มา */
+  function printCheckinReport() {
+    var d = CK.data; if (!d || !d.rows.length) { C.toast('ยังไม่มีรายชื่อในรายการที่เลือก'); return; }
+    var em = {}; A.events.forEach(function (e) { em[e.event] = e; });
+    var logo = A.comp.logo ? '<img class="plogo" src="' + location.origin + esc(A.comp.logo) + '" alt="">' : '';
+    var now = new Date(Date.now() + 7 * 36e5).toISOString().slice(0, 16).replace('T', ' ');
+    var html = A.events.filter(function (e) { return d.events.indexOf(e.event) >= 0; }).map(function (ev) {
+      var rows = d.rows.filter(function (r) { return r.event === ev.event; });
+      if (!rows.length) return '';
+      rows.sort(function (a, b) {
+        if (!!a.checkinAt !== !!b.checkinAt) return a.checkinAt ? -1 : 1;
+        return a.checkinAt ? a.checkinAt.localeCompare(b.checkinAt) : (a.school + a.name).localeCompare(b.school + b.name, 'th');
+      });
+      var n = rows.filter(function (r) { return r.checkinAt; }).length;
+      return '<div class="sheet">' + logo + '<div class="hd"><h2>รายงานการรายงานตัวนักกีฬา</h2><div>' + esc(A.comp.name) + '</div></div>' +
+        '<div class="meta"><b>รายการ</b><span>' + esc(C.levelLabel(ev.level) + ' · ' + ev.short) + ' <span style="color:#555">(' + esc(ev.event) + ')</span></span>' +
+        (ev.startDate ? '<b>วันแข่ง</b><span>' + esc(thDate(ev.startDate, true)) + (ev.startTime ? ' เริ่ม ' + esc(ev.startTime) + ' น.' : '') + '</span>' : '') +
+        '<b>สรุป</b><span>มารายงานตัว ' + n + ' / ' + rows.length + ' คน' + (rows.length - n ? ' · ยังไม่มา ' + (rows.length - n) + ' คน' : '') + '</span></div>' +
+        '<table><thead><tr><th class="c">ที่</th><th>ชื่อ-นามสกุล</th><th>โรงเรียน</th><th>ทีม/คู่</th><th style="width:30mm">เวลา</th></tr></thead><tbody>' +
+        rows.map(function (r, i) {
+          return '<tr><td class="c">' + (i + 1) + '</td><td>' + esc(r.name) + '</td><td>' + esc(r.school) + '</td><td>' + esc(r.teamLabel) + '</td>' +
+            '<td>' + (r.checkinAt ? esc(r.checkinAt.slice(11, 16)) + ' น.' : '<span style="color:#b00">ยังไม่มา</span>') + '</td></tr>';
+        }).join('') + '</tbody></table><div class="foot">พิมพ์เมื่อ ' + esc(now) + ' น.</div></div>';
+    }).join('');
+    openPrintWindow(html, 'รายงานการรายงานตัว');
   }
 
   /* ---------- รายชื่อนักกีฬา: แก้ชื่อสะกดผิด ---------- */
