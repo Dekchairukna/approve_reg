@@ -228,13 +228,14 @@
   function tabPrint() {
     var dayOpts = C.days(A.events).map(function (d) { return '<option value="' + esc(d.startDate || '') + '">' + thDate(d.startDate) + ' · ' + esc(d.cats.join(', ')) + '</option>'; }).join('');
     var levels = C.levelsOf(A.events);
-    tabEl().innerHTML = '<div style="display:grid;gap:12px"><p class="small muted" style="margin:0">พิมพ์เฉพาะรายชื่อที่ยืนยันแล้ว (ไม่รวมช่องที่เลือก "ไม่ส่ง") แยกหน้าตามโรงเรียน</p>' +
+    tabEl().innerHTML = '<div style="display:grid;gap:12px"><p class="small muted" style="margin:0">พิมพ์เฉพาะรายชื่อที่ยืนยันแล้ว (ไม่รวมช่องที่เลือก "ไม่ส่ง") เลือกได้ว่าจะเป็นตารางยาวแยกตามรายการ หรือแยกหน้าตามโรงเรียน</p>' +
       '<div class="print-controls"><label class="f">วันแข่งขัน<select id="pDay"><option value="">ทุกวัน</option>' + dayOpts + '</select></label>' +
       '<label class="f">ประเภท<select id="pCat"><option value="">ทุกประเภท</option>' + A.events.map(function (e) { return e.category; }).filter(function (c, i, a) { return a.indexOf(c) === i; })
         .map(function (c) { return '<option>' + esc(c) + '</option>'; }).join('') + '</select></label>' +
       '<label class="f">โรงเรียน<select id="pSchool"><option value="">ทุกโรงเรียน</option>' + A.schools.map(function (s) { return '<option>' + esc(s) + '</option>'; }).join('') + '</select></label>' +
       '<label class="f">ระดับ<select id="pLevel"><option value="">ทุกระดับ</option>' + levels.map(function (l) { return '<option value="' + esc(l) + '">' + esc(C.levelLabel(l)) + '</option>'; }).join('') + '</select></label>' +
-      '<label class="toggle"><input type="checkbox" id="pBreak"> ขึ้นหน้าใหม่ทุกรายการ</label></div>' +
+      '<label class="f">รูปแบบ<select id="pMode"><option value="event">ตารางยาว แยกตามรายการ (รวมทุกโรงเรียน)</option><option value="school">แยกหน้าตามโรงเรียน</option></select></label>' +
+      '<label class="toggle"><input type="checkbox" id="pBreak"> ขึ้นหน้าใหม่ทุกรายการ (แบบแยกโรงเรียน)</label></div>' +
       '<div class="row"><button class="btn primary" id="pMake">สร้างใบรายงานตัว</button><button class="btn" id="pPrint" hidden>พิมพ์</button>' +
       '<button class="btn" id="pXlsx">ดาวน์โหลดรายชื่อที่ยืนยัน (Excel)</button><span id="pInfo" class="small muted"></span></div>' +
       '<p class="hint" style="margin:0">ไฟล์ Excel เป็นตารางรายชื่อแยกคอลัมน์ คำนำหน้า / ชื่อ / นามสกุล / ทีม ใช้นำไปลงระบบอื่น เช่นระบบ Shooting (เลือกประเภท "Shooting" ก่อนกด)</p>' +
@@ -256,9 +257,10 @@
     var f = { startDate: val('pDay'), school: document.getElementById('pSchool').value, level: document.getElementById('pLevel').value, category: document.getElementById('pCat').value };
     var brk = document.getElementById('pBreak').checked;
     document.getElementById('pInfo').textContent = 'กำลังสร้าง…';
+    var mode = document.getElementById('pMode').value;
     http('POST', '/api/admin/competitions/' + A.comp.id + '/print', f).then(function (d) {
       var area = document.getElementById('printArea');
-      area.innerHTML = d.pages.map(function (pg) {
+      area.innerHTML = mode === 'event' ? eventSheets(d) : d.pages.map(function (pg) {
         return '<div class="sheet">' + pg.blocks.map(function (b, i) {
           return '<div class="blk' + (brk && i ? ' pb' : '') + '"><div class="hd">' + sheetHeader() + '</div>' +
             '<div class="meta"><b>โรงเรียน</b><span>' + esc(pg.school) + '</span><b>รายการ</b><span>' + esc(b.event.replace(/^[^:]*:\s*/, '')) + '</span>' +
@@ -275,13 +277,47 @@
       area.className = d.pages.length ? 'preview' : '';
       A.printHtml = area.innerHTML;
       var nb = d.pages.reduce(function (a, p) { return a + p.blocks.length; }, 0);
-      document.getElementById('pInfo').innerHTML = d.pages.length ? esc(d.pages.length + ' โรงเรียน · ' + nb + ' รายการ · กด "พิมพ์" เพื่อเปิดหน้าพิมพ์ (ตัวอย่างอยู่ด้านล่าง)')
+      document.getElementById('pInfo').innerHTML = d.pages.length ? esc((mode === 'event' ? 'ตารางแยกตามรายการ · ' : '') + d.pages.length + ' โรงเรียน · ' + nb + ' รายการ · กด "พิมพ์" เพื่อเปิดหน้าพิมพ์ (ตัวอย่างอยู่ด้านล่าง)')
         : '<span class="pill bad">ยังไม่มีรายการที่ยืนยันตามเงื่อนไขนี้</span> ใบรายงานตัวพิมพ์ได้หลังโรงเรียนกดยืนยันรายชื่อแล้ว';
       document.getElementById('pPrint').hidden = !d.pages.length;
       document.getElementById('pSkipped').innerHTML = d.skipped.length ? '<div class="locked small"><b>ยังไม่ยืนยัน จึงไม่ได้พิมพ์ (' + d.skipped.length + ')</b><br>' +
         d.skipped.map(function (s) { return esc(s.school + ' · ' + C.levelLabel(s.level) + ' ' + s.short); }).join('<br>') + '</div>' : '';
       if (d.pages.length) area.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }).catch(fail);
+  }
+  /* ตารางยาวแยกตามรายการ: 1 รายการต่อหน้า รวมทุกโรงเรียน (ขึ้นหน้าใหม่เองเมื่อรายชื่อยาว) */
+  function eventSheets(d) {
+    var by = {};
+    d.pages.forEach(function (pg) {
+      pg.blocks.forEach(function (b) {
+        var k = b.event;
+        if (!by[k]) by[k] = { b: b, groups: [] };
+        by[k].groups.push({ school: pg.school, rows: b.rows, auto: !!b.conf.auto });
+      });
+    });
+    var skip = {};
+    d.skipped.forEach(function (x) { var k = x.level + '|' + x.short; (skip[k] = skip[k] || []).push(x.school); });
+    return A.events.filter(function (e) { return by[e.event]; }).map(function (e) {
+      var g = by[e.event], n = 0, total = g.groups.reduce(function (a, x) { return a + x.rows.length; }, 0);
+      var body = g.groups.map(function (grp) {
+        if (!grp.rows.length) return '<tr><td class="c">-</td><td class="sch">' + esc(grp.school.replace(/^โรงเรียน/, '')) + '</td><td colspan="4" style="text-align:center;color:#555">ไม่ส่งแข่งรายการนี้</td></tr>';
+        return grp.rows.map(function (r, j) {
+          n++;
+          return '<tr><td class="c">' + n + '</td>' + (j === 0 ? '<td class="sch" rowspan="' + grp.rows.length + '">' + esc(grp.school.replace(/^โรงเรียน/, '')) + (grp.auto ? ' <span style="font-size:11px">*</span>' : '') + '</td>' : '') +
+            '<td>' + esc(r.teamLabel) + '</td><td class="nm">' + esc(r.name) + '</td><td></td><td></td></tr>';
+        }).join('');
+      }).join('');
+      var miss = skip[e.level + '|' + e.short] || [];
+      return '<div class="sheet ev"><div class="hd">' + sheetHeader() + '</div>' +
+        '<div class="meta"><b>รายการ</b><span>' + esc(C.levelLabel(e.level) + ' · ' + e.short) + ' <span style="color:#555">(' + esc(e.event.replace(/^[^:]*:\s*/, '')) + ')</span></span>' +
+        '<b>วันแข่งขัน</b><span>' + thDate(e.startDate, true) + (e.startTime ? ' เริ่ม ' + esc(e.startTime) + ' น.' : '') + '</span>' +
+        '<b>จำนวน</b><span>' + g.groups.length + ' โรงเรียน · ' + total + ' คน</span></div>' +
+        '<table class="long"><colgroup><col style="width:9mm"><col style="width:46mm"><col style="width:17mm"><col><col style="width:28mm"><col style="width:15mm"></colgroup><thead><tr><th class="c">ที่</th><th>โรงเรียน</th><th>คู่/ทีม</th><th>ชื่อ - นามสกุล</th><th>ลงชื่อนักกีฬา</th><th>เวลา</th></tr></thead><tbody>' + body + '</tbody></table>' +
+        '<div class="foot">' + (g.groups.some(function (x) { return x.auto; }) ? '* ไม่มีการยืนยันก่อนเวลาปิด ใช้รายชื่อตามที่สมัคร<br>' : '') +
+        (miss.length ? 'ยังไม่ยืนยันรายชื่อ (ไม่ได้พิมพ์): ' + esc(miss.join(', ')) : '') + '</div>' +
+        '<div class="signs"><div><span>ลงชื่อ ...................................................</span><span>เจ้าหน้าที่รับรายงานตัว</span></div>' +
+        '<div><span>ลงชื่อ ...................................................</span><span>ผู้ตัดสิน / กรรมการเทคนิค</span></div></div></div>';
+    }).join('');
   }
   function hidePrint() { var p = document.getElementById('printArea'); p.className = ''; p.innerHTML = ''; A.printHtml = ''; }
   var PRINT_CSS = '@page{size:A4;margin:12mm}body{margin:0;background:#ebe7f1;font-family:Sarabun,"IBM Plex Sans Thai",sans-serif;color:#000}' +
@@ -292,6 +328,7 @@
     '.plogo{height:18mm;display:block;margin:0 auto 2mm}.blk+.blk{margin-top:9mm;padding-top:6mm;border-top:1px dashed #999}.hd{text-align:center;margin-bottom:4mm}.hd h2{font-size:21px;margin:0}' +
     '.meta{display:grid;grid-template-columns:auto 1fr;gap:1mm 4mm;margin-bottom:3mm}table{width:100%;border-collapse:collapse}' +
     'th,td{border:1px solid #000;padding:1.6mm 2.4mm;text-align:left}th{background:#eee}td.c,th.c{text-align:center;width:12mm}td.sig,th.sig{width:45mm}' +
+    'table.long{table-layout:fixed;font-size:13.5px}table.long th,table.long td{padding:2.2mm 1.6mm}table.long thead{display:table-header-group}table.long tr{page-break-inside:avoid;break-inside:avoid}td.sch{font-size:12.5px;vertical-align:top;line-height:1.3}td.nm{white-space:nowrap;overflow:hidden}' +
     '.foot{margin-top:3mm;font-size:13.5px}.signs{display:grid;grid-template-columns:1fr 1fr;gap:8mm;margin-top:8mm;text-align:center;font-size:14px}.signs div{display:grid;gap:1mm}' +
     '@media print{body{background:#fff}.bar{display:none}.sheets{display:block;padding:0}.sheet{box-shadow:none;width:auto;padding:0;page-break-after:always;break-after:page}' +
     '.sheet:last-child{page-break-after:auto;break-after:auto}.blk.pb{break-before:page;page-break-before:always;border-top:0;margin-top:0;padding-top:0}' +
