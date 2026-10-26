@@ -298,13 +298,19 @@
     var skip = {};
     d.skipped.forEach(function (x) { var k = x.level + '|' + x.short; (skip[k] = skip[k] || []).push(x.school); });
     return A.events.filter(function (e) { return by[e.event]; }).map(function (e) {
-      var g = by[e.event], n = 0, total = g.groups.reduce(function (a, x) { return a + x.rows.length; }, 0);
+      var g = by[e.event], total = g.groups.reduce(function (a, x) { return a + x.rows.length; }, 0);
+      var tl = function (t) { return String(t || '').replace('คู่ที่', 'ทีมที่').replace('ไม่ระบุคู่', 'ไม่ระบุทีม'); };
       var body = g.groups.map(function (grp) {
-        if (!grp.rows.length) return '<tr><td class="c">-</td><td class="sch">' + esc(grp.school.replace(/^โรงเรียน/, '')) + '</td><td colspan="4" style="text-align:center;color:#555">ไม่ส่งแข่งรายการนี้</td></tr>';
+        var sch = esc(grp.school.replace(/^โรงเรียน/, '')) + (grp.auto ? ' <span style="font-size:11px">*</span>' : '');
+        if (!grp.rows.length) return '<tr><td class="sch">' + sch + '</td><td colspan="4" style="color:#555">ไม่ส่งแข่งรายการนี้</td></tr>';
         return grp.rows.map(function (r, j) {
-          n++;
-          return '<tr><td class="c">' + n + '</td>' + (j === 0 ? '<td class="sch" rowspan="' + grp.rows.length + '">' + esc(grp.school.replace(/^โรงเรียน/, '')) + (grp.auto ? ' <span style="font-size:11px">*</span>' : '') + '</td>' : '') +
-            '<td>' + esc(r.teamLabel) + '</td><td class="nm">' + esc(r.name) + '</td><td></td><td></td></tr>';
+          var team = tl(r.teamLabel), cell = '';
+          if (j === 0 || tl(grp.rows[j - 1].teamLabel) !== team) {   // ผสานช่องทีมเมื่ออยู่ทีมเดียวกัน
+            var span = 1; while (j + span < grp.rows.length && tl(grp.rows[j + span].teamLabel) === team) span++;
+            cell = '<td' + (span > 1 ? ' rowspan="' + span + '"' : '') + '>' + esc(team) + '</td>';
+          }
+          return '<tr>' + (j === 0 ? '<td class="sch" rowspan="' + grp.rows.length + '">' + sch + '</td>' : '') + cell +
+            '<td class="nm">' + esc(r.name) + '</td><td></td><td></td></tr>';
         }).join('');
       }).join('');
       var miss = skip[e.level + '|' + e.short] || [];
@@ -312,7 +318,7 @@
         '<div class="meta"><b>รายการ</b><span>' + esc(C.levelLabel(e.level) + ' · ' + e.short) + ' <span style="color:#555">(' + esc(e.event.replace(/^[^:]*:\s*/, '')) + ')</span></span>' +
         '<b>วันแข่งขัน</b><span>' + thDate(e.startDate, true) + (e.startTime ? ' เริ่ม ' + esc(e.startTime) + ' น.' : '') + '</span>' +
         '<b>จำนวน</b><span>' + g.groups.length + ' โรงเรียน · ' + total + ' คน</span></div>' +
-        '<table class="long"><colgroup><col style="width:9mm"><col style="width:46mm"><col style="width:17mm"><col><col style="width:28mm"><col style="width:15mm"></colgroup><thead><tr><th class="c">ที่</th><th>โรงเรียน</th><th>คู่/ทีม</th><th>ชื่อ - นามสกุล</th><th>ลงชื่อนักกีฬา</th><th>เวลา</th></tr></thead><tbody>' + body + '</tbody></table>' +
+        '<table class="long"><colgroup><col style="width:50mm"><col style="width:20mm"><col><col style="width:30mm"><col style="width:16mm"></colgroup><thead><tr><th>โรงเรียน</th><th>ทีม</th><th>ชื่อ - นามสกุล</th><th>ลงชื่อนักกีฬา</th><th>เวลา</th></tr></thead><tbody>' + body + '</tbody></table>' +
         '<div class="foot">' + (g.groups.some(function (x) { return x.auto; }) ? '* ไม่มีการยืนยันก่อนเวลาปิด ใช้รายชื่อตามที่สมัคร<br>' : '') +
         (miss.length ? 'ยังไม่ยืนยันรายชื่อ (ไม่ได้พิมพ์): ' + esc(miss.join(', ')) : '') + '</div>' +
         '<div class="signs"><div><span>ลงชื่อ ...................................................</span><span>เจ้าหน้าที่รับรายงานตัว</span></div>' +
