@@ -15,6 +15,7 @@
       <div class="brand" id="brand"><div class="logo-ph"></div><div><div class="games">&nbsp;</div><h1>รายงานผลการแข่งขัน</h1></div></div>
       <div class="staffbar" id="staffbar"></div>
     </div>
+    <nav class="nav pagenav" id="pagenav"></nav>
   </div>
 </header>
 <main><div class="wrap" id="app"><div class="loading">กำลังโหลด…</div></div></main>
@@ -32,6 +33,13 @@
   function medal(m) { return '<span class="medal ' + m + '">' + MED[m] + '</span>'; }
   function shortSchool(s) { return (s || '').replace(/^โรงเรียน/, ''); }
 
+  function pageNav(slug, cur) {
+    var b = '/c/' + encodeURIComponent(slug);
+    document.getElementById('pagenav').innerHTML = [[b, 'confirm', 'ยืนยันรายชื่อนักกีฬา'], [b + '/results', 'results', 'ผลการแข่งขัน']].map(function (x) {
+      return '<a href="' + x[0] + '"' + (x[1] === cur ? ' aria-current="page"' : '') + '>' + x[2] + '</a>';
+    }).join('');
+  }
+  pageNav(slug, 'results');
   function load() {
     C.http('GET', '/api/c/' + encodeURIComponent(slug) + '/results').then(function (d) {
       R.d = d;

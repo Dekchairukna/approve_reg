@@ -270,3 +270,7 @@ table.pmed td:nth-child(2){text-align:left}
 .pm-items span{white-space:nowrap}
 .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px;vertical-align:middle}
 .dot.gold{background:#e5be2c}.dot.silver{background:#a9b0ba}.dot.bronze{background:#c47a3f}
+.nav a { color: var(--band-muted); padding: 7px 14px; border-radius: 8px; font-size: 14px; text-decoration: none }
+.nav a:hover { color: var(--band-ink) }
+.nav a[aria-current="page"] { background: rgba(255,255,255,.12); color: var(--band-ink); font-weight: 600 }
+.pagenav { margin-top: 10px }

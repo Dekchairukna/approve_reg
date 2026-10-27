@@ -16,6 +16,7 @@
       <div class="brand" id="brand"><div class="logo-ph"></div><div><div class="games">&nbsp;</div><h1>ยืนยันรายชื่อนักกีฬา</h1></div></div>
       <div class="staffbar" id="staffbar"></div>
     </div>
+    <nav class="nav pagenav" id="pagenav"></nav>
     <div class="deadlines" id="deadlines"></div>
   </div>
 </header>
@@ -34,8 +35,15 @@
   function pkey(f, l) { return norm(f) + norm(l); }
   function errMsg(e) { return (e && (e.message || e)) + ''; }
 
+  function pageNav(slug, cur) {
+    var b = '/c/' + encodeURIComponent(slug);
+    document.getElementById('pagenav').innerHTML = [[b, 'confirm', 'ยืนยันรายชื่อนักกีฬา'], [b + '/results', 'results', 'ผลการแข่งขัน']].map(function (x) {
+      return '<a href="' + x[0] + '"' + (x[1] === cur ? ' aria-current="page"' : '') + '>' + x[2] + '</a>';
+    }).join('');
+  }
   function renderHeader() {
     var c = S.comp;
+    pageNav(c.slug, 'confirm');
     document.title = 'ยืนยันรายชื่อ · ' + c.name;
     document.getElementById('brand').innerHTML = C.logoHtml(c) +
       '<div><div class="games">' + esc(c.name) + '</div><h1>ยืนยันรายชื่อนักกีฬา' + esc(c.sport || '') + '</h1></div>';
