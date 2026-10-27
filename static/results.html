@@ -87,20 +87,30 @@
   }
 
   function drawPerson() {
-    var q = R.q.trim().toLowerCase();
-    var ppl = R.d.people.filter(function (p) {
-      return (!R.level || p.level === R.level) && (!q || (p.name + ' ' + p.school + ' ' + p.short).toLowerCase().indexOf(q) >= 0);
+    var q = R.q.trim().toLowerCase(), map = {}, list = [];
+    R.d.people.forEach(function (p) {
+      if (R.level && p.level !== R.level) return;
+      var k = p.school + '|' + p.name.replace(/\s+/g, '');
+      if (!map[k]) { map[k] = { name: p.name, school: p.school, gold: 0, silver: 0, bronze: 0, items: [] }; list.push(map[k]); }
+      map[k][p.medal]++; map[k].items.push(p);
     });
-    var groups = {}, order = [];
-    ppl.forEach(function (p) { if (!groups[p.school]) { groups[p.school] = []; order.push(p.school); } groups[p.school].push(p); });
+    var ord = { gold: 0, silver: 1, bronze: 2 };
+    list.forEach(function (x) { x.total = x.gold + x.silver + x.bronze; x.items.sort(function (a, b) { return ord[a.medal] - ord[b.medal]; }); });
+    list.sort(function (a, b) { return b.gold - a.gold || b.silver - a.silver || b.bronze - a.bronze || a.name.localeCompare(b.name, 'th'); });
+    var prev = null, rank = 0;
+    list.forEach(function (x, i) { var key = x.gold + '-' + x.silver + '-' + x.bronze; if (key !== prev) { rank = i + 1; prev = key; } x.rank = rank; });
+    var shown = list.filter(function (x) {
+      return !q || (x.name + ' ' + x.school + ' ' + x.items.map(function (p) { return p.short; }).join(' ')).toLowerCase().indexOf(q) >= 0;
+    });
     body().innerHTML = '<div style="display:grid;gap:10px"><div class="row"><input type="search" id="q" placeholder="ค้นหาชื่อนักกีฬา โรงเรียน หรือรายการ" value="' + esc(R.q) + '" style="flex:1;min-width:180px">' + levelBtns(R.level, 'level') + '</div>' +
-      '<div id="plist">' + (ppl.length ? order.map(function (s) {
-        return '<h3 style="margin:14px 0 6px">' + esc(shortSchool(s)) + ' <span class="small muted">(' + groups[s].length + ' รางวัล)</span></h3><div class="tbl-wrap"><table class="t ppl"><thead><tr><th style="text-align:left">ชื่อ-นามสกุล</th><th>รายการ</th><th>ทีม</th><th>รางวัล</th></tr></thead><tbody>' +
-          groups[s].map(function (p) {
-            return '<tr><td>' + esc(p.name) + '</td><td>' + esc(C.levelLabel(p.level) + ' ' + p.short) + '</td><td>' + esc(p.label) + '</td><td>' + medal(p.medal) + '</td></tr>';
-          }).join('') + '</tbody></table></div>';
-      }).join('') : (R.d.people.length ? '<p class="muted">ไม่พบรายชื่อที่ค้นหา</p>' : empty)) + '</div>' +
-      (ppl.length ? '<p class="hint" style="margin:0">นักกีฬาทุกคนในทีมที่ได้รางวัล (รวมตัวสำรอง) ได้รับรางวัลเท่ากัน</p>' : '') + '</div>';
+      (shown.length ? '<div class="tbl-wrap"><table class="t medals pmed"><thead><tr><th>อันดับ</th><th style="text-align:left">ชื่อ-นามสกุล</th><th>' + medal('gold') + '</th><th>' + medal('silver') + '</th><th>' + medal('bronze') + '</th><th>รวม</th></tr></thead><tbody>' +
+        shown.map(function (x) {
+          return '<tr><td class="num">' + x.rank + '</td><td><b>' + esc(x.name) + '</b><div class="small muted">' + esc(shortSchool(x.school)) + '</div>' +
+            '<div class="small pm-items">' + x.items.map(function (p) { return '<span><i class="dot ' + p.medal + '"></i>' + esc(C.levelLabel(p.level) + ' ' + p.short) + '</span>'; }).join('') + '</div></td>' +
+            '<td class="num">' + x.gold + '</td><td class="num">' + x.silver + '</td><td class="num">' + x.bronze + '</td><td class="num"><b>' + x.total + '</b></td></tr>';
+        }).join('') + '</tbody></table></div>' +
+        '<p class="hint" style="margin:0">เรียงตามจำนวนเหรียญทอง ถ้าเท่ากันดูเหรียญเงิน แล้วเหรียญทองแดง · นักกีฬาทุกคนในทีมที่ได้รางวัล (รวมตัวสำรอง) นับรางวัลเท่ากัน</p>'
+        : (list.length ? '<p class="muted">ไม่พบรายชื่อที่ค้นหา</p>' : empty)) + '</div>';
     var inp = document.getElementById('q');
     inp.oninput = function () { R.q = this.value; var pos = this.selectionStart; drawPerson(); var n = document.getElementById('q'); n.focus(); n.setSelectionRange(pos, pos); };
     bindLevels('level', drawPerson);

@@ -265,3 +265,8 @@ table.ppl{table-layout:fixed}table.ppl th:nth-child(1){width:38%}table.ppl th:nt
 @media (max-width:640px){table.medals .medal{min-width:0;padding:2px 6px;font-size:12px}table.medals td,table.medals th{padding:6px 4px}
 table.ppl{table-layout:auto}table.ppl th:nth-child(3),table.ppl td:nth-child(3){display:none}}
 .notice{background:rgba(46,160,67,.12);border:1px solid rgba(46,160,67,.45);border-radius:12px;padding:10px 14px}
+table.pmed td:nth-child(2){text-align:left}
+.pm-items{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:3px}
+.pm-items span{white-space:nowrap}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px;vertical-align:middle}
+.dot.gold{background:#e5be2c}.dot.silver{background:#a9b0ba}.dot.bronze{background:#c47a3f}
