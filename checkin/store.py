@@ -59,3 +59,8 @@ def load_all(cid, auto=True):
 def schools(cid):
     return [r[0] for r in get_db().execute(
         'SELECT DISTINCT school FROM entries WHERE comp_id=? ORDER BY school', (cid,))]
+
+
+def load_results(cid):
+    return [dict(event=r['event'], school=r['school'], unit=r['unit'], medal=r['medal'], by=r['by_user'], at=r['at'])
+            for r in get_db().execute('SELECT * FROM ck_results WHERE comp_id=?', (cid,))]

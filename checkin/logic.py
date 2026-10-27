@@ -337,3 +337,136 @@ def print_data(entries, events, confs, f):
         if blocks:
             pages.append(dict(school=s, blocks=blocks))
     return dict(pages=pages, skipped=skipped)
+
+
+# ---------------- ผลการแข่งขัน ----------------
+MEDALS = ('gold', 'silver', 'bronze', 'none')
+MEDAL_TH = {'gold': 'ทอง', 'silver': 'เงิน', 'bronze': 'ทองแดง', 'none': 'ไม่ได้รางวัล'}
+MEDAL_MAX = {'gold': 1, 'silver': 1, 'bronze': 2}     # เปตองมีทองแดงร่วม 2 ทีม
+
+
+def result_units(entries, events, school=None, event=None):
+    """หน่วยที่ได้รางวัล: ประเภทเดี่ยว = รายคน, ประเภทคู่/ทีม = ทีม (รวมตัวสำรอง)
+    ใช้เฉพาะรายชื่อที่ยืนยันแล้ว (ส่ง entries ที่ผ่าน apply_auto มา)"""
+    em = {e['event']: e for e in events}
+    out = {}
+    for e in sorted(entries, key=team_sort):
+        ev = em.get(e['event'])
+        if not ev or e['status'] != OK or (school and e['school'] != school) or (event and e['event'] != event):
+            continue
+        single = team_size(ev['category']) == 1
+        unit = f"e{e['id']}" if single else str(e['team'])
+        k = (e['event'], e['school'], unit)
+        if k not in out:
+            out[k] = dict(event=e['event'], short=ev['short'], level=ev['level'], category=ev['category'],
+                          startDate=ev['startDate'], sort=ev.get('sort', 0), school=e['school'], unit=unit,
+                          label='บุคคล' if single else team_label(e['team'], ev['category']).replace('คู่ที่', 'ทีมที่'),
+                          members=[])
+        out[k]['members'].append(f"{e['prefix']}{e['first']} {e['last']}")
+    order = {e['event']: i for i, e in enumerate(events)}
+    return sorted(out.values(), key=lambda u: (order.get(u['event'], 0), u['school'], u['unit']))
+
+
+def results_public(entries, events, results):
+    """ตารางเหรียญตามสถาบัน (นับต่อทีม) + รายบุคคล + ผลรายรายการ"""
+    rm = {(r['event'], r['school'], r['unit']): r['medal'] for r in results}
+    units = result_units(entries, events)
+    for u in units:
+        u['medal'] = rm.get((u['event'], u['school'], u['unit']), '')
+    won = [u for u in units if u['medal'] in MEDAL_MAX]
+    table = {}
+    for u in won:
+        for lv in ('', u['level']):
+            t = table.setdefault((lv, u['school']), dict(school=u['school'], level=lv, gold=0, silver=0, bronze=0))
+            t[u['medal']] += 1
+    rows = [dict(t, total=t['gold'] + t['silver'] + t['bronze']) for t in table.values()]
+    rows.sort(key=lambda t: (t['level'], -t['gold'], -t['silver'], -t['bronze'], t['school']))
+    people = [dict(name=m, school=u['school'], event=u['event'], short=u['short'], level=u['level'],
+                   label=u['label'], medal=u['medal']) for u in won for m in u['members']]
+    rank = {'gold': 0, 'silver': 1, 'bronze': 2}
+    people.sort(key=lambda p: (p['school'], p['name'], rank[p['medal']]))
+    by_event = []
+    em = {}
+    for u in won:
+        em.setdefault(u['event'], []).append(u)
+    for ev in events:
+        if ev['event'] in em:
+            by_event.append(dict(event=ev['event'], short=ev['short'], level=ev['level'], startDate=ev['startDate'],
+                                 winners=sorted(em[ev['event']], key=lambda u: rank[u['medal']])))
+    done = len({u['event'] for u in units if u['medal']})
+    return dict(table=rows, people=people, events=by_event,
+                progress=dict(events=len({u['event'] for u in units}), withResult=done))
+
+
+MEDAL_FROM_TH = {'ทอง': 'gold', 'ชนะเลิศ': 'gold', 'เงิน': 'silver', 'รองชนะเลิศอันดับ 1': 'silver',
+                 'ทองแดง': 'bronze', 'รองชนะเลิศอันดับ 2': 'bronze', 'gold': 'gold', 'silver': 'silver', 'bronze': 'bronze'}
+_PREFIX = re.compile(r'^(ด\.ช\.|ด\.ญ\.|เด็กชาย|เด็กหญิง|นางสาว|น\.ส\.|นาย|นาง)')
+
+
+def norm_name(s):
+    s = re.sub(r'\s+', '', str(s or ''))
+    return _PREFIX.sub('', s)
+
+
+def match_results(rows, units):
+    """rows: [{event, medal, name, group}] 1 แถวต่อ 1 คน; แถวที่ event+medal+group เดียวกันคือทีมเดียวกัน
+    (group = ชื่อโรงเรียนในไฟล์ ถ้าไม่มีถือว่าแต่ละแถวเป็นคนละทีม)
+    จับคู่กับหน่วยตามชื่อ: ตรงกันก่อน ไม่ตรงใช้ชื่อที่คล้ายที่สุด (สะกดต่างเล็กน้อย)
+    ทีมที่หาเจออย่างน้อย 1 คนถือว่าใช้ได้ ส่วนคนที่หาไม่เจอแจ้งเป็นคำเตือน
+    คืน (found {(event, school, unit): (medal, unit)}, problems, notes)"""
+    import difflib
+    by_ev = {}
+    for u in units:
+        by_ev.setdefault(u['event'], []).append(u)
+
+    def find(cand, name):
+        n = norm_name(name)
+        hit = [u for u in cand if any(norm_name(m) == n for m in u['members'])]
+        if hit:
+            return hit, False
+        best, score = None, 0
+        for u in cand:
+            for m in u['members']:
+                sc = difflib.SequenceMatcher(None, n, norm_name(m)).ratio()
+                if sc > score:
+                    best, score = u, sc
+        return ([best], True) if best and score >= 0.8 else ([], False)
+
+    groups, order = {}, []
+    for i, r in enumerate(rows):
+        k = (r['event'], r['medal'], r.get('group') or f'#{i}')
+        if k not in groups:
+            groups[k] = []
+            order.append(k)
+        groups[k].append(r)
+    found, problems, notes = {}, [], []
+    for k in order:
+        ev, medal, _ = k
+        short = ev.replace('เปตอง : ', '')
+        cand = by_ev.get(ev, [])
+        if not cand:
+            problems.append(f"ไม่พบรายการ “{ev}” หรือไม่มีทีมที่ยืนยันแล้ว")
+            continue
+        hits, miss = {}, []
+        for r in groups[k]:
+            h, fz = find(cand, r['name'])
+            if len(h) == 1:
+                hits[(h[0]['school'], h[0]['unit'])] = h[0]
+                if fz:
+                    notes.append(f"{short}: “{r['name']}” ใช้ชื่อในระบบ " + next(
+                        m for m in h[0]['members'] if difflib.SequenceMatcher(None, norm_name(r['name']), norm_name(m)).ratio() >= 0.8))
+            else:
+                miss.append(r['name'])
+        names = ', '.join(r['name'] for r in groups[k])
+        if len(hits) != 1:
+            problems.append(f"{short} ({MEDAL_TH[medal]}): " + (f"ไม่พบ {names}" if not hits else f"{names} อยู่คนละทีมในระบบ"))
+            continue
+        u = next(iter(hits.values()))
+        for n in miss:
+            notes.append(f"{short}: ไม่พบ “{n}” แต่พบเพื่อนร่วมทีม ({u['school']} {u['label']})")
+        fk = (u['event'], u['school'], u['unit'])
+        if fk in found and found[fk][0] != medal:
+            problems.append(f"{short}: {u['school']} ได้ผลขัดกัน")
+            continue
+        found[fk] = (medal, u)
+    return found, problems, notes

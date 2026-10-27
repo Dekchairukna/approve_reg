@@ -41,6 +41,19 @@ def comp_page(slug):
     return Response(page, mimetype='text/html')
 
 
+@bp.get('/c/<slug>/results')
+def results_page(slug):
+    _comp(slug)
+    return static_page('results.html')
+
+
+@bp.get('/api/c/<slug>/results')
+def results_api(slug):
+    c = _comp(slug)
+    entries, events, _ = store.load_all(c['id'])
+    return jsonify(comp=store.comp_public(c), **logic.results_public(entries, events, store.load_results(c['id'])))
+
+
 @bp.get('/logo/<int:cid>')
 def logo(cid):
     r = get_db().execute('SELECT logo_mime, logo_data FROM competitions WHERE id=?', (cid,)).fetchone()

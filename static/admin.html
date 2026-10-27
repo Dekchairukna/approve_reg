@@ -164,7 +164,7 @@
   }
 
   /* ---------- รายละเอียดการแข่งขัน ---------- */
-  var TABS = [['overview', 'ภาพรวม'], ['checkin', 'รายงานตัว'], ['athletes', 'รายชื่อนักกีฬา'], ['print', 'พิมพ์ใบรายงานตัว'], ['schedule', 'วันแข่ง / เวลาปิด'], ['logs', 'ประวัติการแก้ไข'], ['settings', 'ตั้งค่า']];
+  var TABS = [['overview', 'ภาพรวม'], ['checkin', 'รายงานตัว'], ['athletes', 'รายชื่อนักกีฬา'], ['print', 'พิมพ์ใบรายงานตัว'], ['results', 'ผลการแข่งขัน'], ['schedule', 'วันแข่ง / เวลาปิด'], ['logs', 'ประวัติการแก้ไข'], ['settings', 'ตั้งค่า']];
   function openComp(id, tab) {
     var load = A.comp && A.comp.id === id ? Promise.resolve() : http('GET', '/api/admin/competitions/' + id).then(function (d) {
       A.comp = d.comp; A.events = d.events; A.schools = d.schools;
@@ -180,7 +180,8 @@
       '<div style="min-width:0"><h2>' + esc(c.name) + '</h2><div class="small muted">' + esc([c.sport ? 'กีฬา' + c.sport : '', c.subtitle].filter(Boolean).join(' · ')) +
       (c.active ? '' : ' · <span class="danger">ปิดใช้งาน</span>') + '</div>' +
       '<div class="copy" style="margin-top:6px"><span class="muted">ลิงก์สำหรับโรงเรียน</span><code id="link">' + esc(link) + '</code>' +
-      '<button class="btn" id="copyLink" style="padding:4px 10px">คัดลอก</button><a class="btn" href="/c/' + esc(c.slug) + '" target="_blank" rel="noopener" style="padding:4px 10px;text-decoration:none">เปิด</a></div></div></div>' +
+      '<button class="btn" id="copyLink" style="padding:4px 10px">คัดลอก</button><a class="btn" href="/c/' + esc(c.slug) + '" target="_blank" rel="noopener" style="padding:4px 10px;text-decoration:none">เปิด</a>' +
+      '<a class="btn" href="/c/' + esc(c.slug) + '/results" target="_blank" rel="noopener" style="padding:4px 10px;text-decoration:none">หน้าผลการแข่งขัน</a></div></div></div>' +
       '<div class="subtabs" role="tablist">' + tabs.map(function (t) { return '<button role="tab" data-t="' + t[0] + '" aria-selected="' + (t[0] === tab) + '">' + t[1] + '</button>'; }).join('') + '</div>' +
       '<div id="tab"><div class="loading">กำลังโหลด…</div></div></section>';
     document.getElementById('back').onclick = function () { A.comp = null; go('comps'); };
@@ -190,7 +191,7 @@
       });
     };
     app.querySelectorAll('.subtabs button').forEach(function (b) { b.onclick = function () { go('comp/' + c.id + '/' + b.getAttribute('data-t')); }; });
-    ({ overview: tabOverview, checkin: tabCheckin, athletes: tabAthletes, print: tabPrint, schedule: tabSchedule, logs: tabLogs, settings: tabSettings }[tab] || tabOverview)();
+    ({ overview: tabOverview, checkin: tabCheckin, athletes: tabAthletes, print: tabPrint, results: tabResults, schedule: tabSchedule, logs: tabLogs, settings: tabSettings }[tab] || tabOverview)();
   }
   function tabEl() { return document.getElementById('tab'); }
 
@@ -645,6 +646,98 @@
         }).catch(function (e) { b.disabled = false; fail(e); });
       };
     });
+  }
+
+  /* ---------- ผลการแข่งขัน ---------- */
+  var RS = { mode: 'school', school: '', event: '' };
+  var MEDAL_BTNS = [['gold', 'ทอง'], ['silver', 'เงิน'], ['bronze', 'ทองแดง'], ['none', 'ไม่ได้รางวัล']];
+  function tabResults() {
+    try { var sv = JSON.parse(C.store('rs_' + A.comp.id) || '{}'); RS.mode = sv.mode || 'school'; RS.school = sv.school || ''; RS.event = sv.event || ''; } catch (e) {}
+    if (A.schools.indexOf(RS.school) < 0) RS.school = '';
+    if (!A.events.some(function (e) { return e.event === RS.event; })) RS.event = '';
+    var c = A.comp;
+    tabEl().innerHTML = '<div style="display:grid;gap:12px">' +
+      '<div class="row"><div class="ck-filter" role="group" id="rsMode">' + [['school', 'เลือกตามโรงเรียน'], ['event', 'เลือกตามรายการ']].map(function (m) {
+        return '<button data-m="' + m[0] + '" aria-pressed="' + (RS.mode === m[0]) + '">' + m[1] + '</button>'; }).join('') + '</div>' +
+      '<select id="rsPick" style="flex:1;min-width:220px"></select></div>' +
+      '<div class="row"><a class="btn" href="/c/' + esc(c.slug) + '/results" target="_blank" rel="noopener" style="text-decoration:none">เปิดหน้ารายงานผล (สาธารณะ)</a>' +
+      '<a class="btn" href="/api/admin/competitions/' + c.id + '/results.xlsx" style="text-decoration:none">ดาวน์โหลด Excel ผลการแข่งขัน</a>' +
+      '<label class="btn" style="cursor:pointer">นำเข้าผลจาก Excel<input type="file" id="rsFile" accept=".xlsx" hidden></label>' +
+      '<span class="small muted">ทอง 1 · เงิน 1 · ทองแดง 2 ต่อรายการ · กดซ้ำที่ปุ่มเดิมเพื่อยกเลิก</span></div>' +
+      '<div id="rsImp"></div><div id="rsList"></div></div>';
+    tabEl().querySelectorAll('#rsMode button').forEach(function (b) {
+      b.onclick = function () { RS.mode = b.getAttribute('data-m'); saveRS(); tabResults(); };
+    });
+    var sel = document.getElementById('rsPick');
+    if (RS.mode === 'school') {
+      sel.innerHTML = '<option value="">— เลือกโรงเรียน —</option>' + A.schools.map(function (s) { return '<option' + (s === RS.school ? ' selected' : '') + '>' + esc(s) + '</option>'; }).join('');
+    } else {
+      sel.innerHTML = '<option value="">— เลือกรายการ —</option>' + A.events.map(function (e) {
+        return '<option value="' + esc(e.event) + '"' + (e.event === RS.event ? ' selected' : '') + '>' + esc(C.levelLabel(e.level) + ' · ' + e.short + (e.startDate ? ' (' + thDate(e.startDate, true) + ')' : '')) + '</option>';
+      }).join('');
+    }
+    sel.onchange = function () { if (RS.mode === 'school') RS.school = sel.value; else RS.event = sel.value; saveRS(); loadResults(); };
+    document.getElementById('rsFile').onchange = function () { if (this.files[0]) importResults(this.files[0], true); this.value = ''; };
+    loadResults();
+  }
+  /* นำเข้า: ตรวจก่อน (dry) แล้วให้กดยืนยันบันทึก */
+  function importResults(file, dry) {
+    var box = document.getElementById('rsImp'), fd = new FormData(); fd.append('file', file);
+    box.innerHTML = '<div class="loading">กำลังตรวจไฟล์…</div>';
+    http('POST', '/api/admin/competitions/' + A.comp.id + '/results/import' + (dry ? '?dry=1' : ''), fd).then(function (d) {
+      var info = 'พบ ' + d.events + ' รายการ · ' + d.units + ' ทีม/คน' +
+        (d.fuzzy.length ? '<div class="small">ชื่อสะกดต่างจากระบบ (จับคู่ให้แล้ว): ' + d.fuzzy.map(esc).join(' · ') + '</div>' : '');
+      if (d.problems.length) {
+        box.innerHTML = '<div class="errors"><b>ยังนำเข้าไม่ได้ — แก้ไฟล์แล้วลองใหม่</b><ul>' + d.problems.map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('') + '</ul>' + info + '</div>';
+      } else if (d.saved) {
+        box.innerHTML = '<div class="notice">บันทึกผลแล้ว ' + info + '</div>'; loadResults();
+      } else {
+        box.innerHTML = '<div class="notice">' + info + '<div class="small">ผลเดิมของรายการในไฟล์จะถูกแทนที่</div><div class="row" style="margin-top:6px"><button class="btn primary" id="rsGo">ยืนยันบันทึกผล</button><button class="btn" id="rsNo">ยกเลิก</button></div></div>';
+        document.getElementById('rsGo').onclick = function () { importResults(file, false); };
+        document.getElementById('rsNo').onclick = function () { box.innerHTML = ''; };
+      }
+    }).catch(function (e) { box.innerHTML = ''; fail(e); });
+  }
+  function saveRS() { C.store('rs_' + A.comp.id, JSON.stringify(RS)); }
+  function loadResults() {
+    var box = document.getElementById('rsList'), v = RS.mode === 'school' ? RS.school : RS.event;
+    if (!v) { box.innerHTML = '<p class="muted">' + (RS.mode === 'school' ? 'เลือกโรงเรียนเพื่อบันทึกผลของแต่ละทีม' : 'เลือกรายการเพื่อบันทึกผลของทุกโรงเรียน') + '</p>'; return; }
+    box.innerHTML = '<div class="loading">กำลังโหลด…</div>';
+    http('GET', '/api/admin/competitions/' + A.comp.id + '/results?' + (RS.mode === 'school' ? 'school=' : 'event=') + encodeURIComponent(v)).then(function (d) {
+      if (!d.units.length) { box.innerHTML = '<p class="muted">ไม่มีทีมที่ยืนยันรายชื่อแล้ว</p>'; return; }
+      var groups = {}, order = [];
+      d.units.forEach(function (u) { var k = RS.mode === 'school' ? u.event : u.school; if (!groups[k]) { groups[k] = []; order.push(k); } groups[k].push(u); });
+      var done = d.units.filter(function (u) { return u.medal; }).length;
+      box.innerHTML = '<p class="small muted" style="margin:0 0 6px">บันทึกแล้ว <b id="rsDone">' + done + '</b> / ' + d.units.length + ' ทีม</p>' + order.map(function (k) {
+        var u0 = groups[k][0];
+        return '<div class="res-ev"><h3>' + esc(RS.mode === 'school' ? C.levelLabel(u0.level) + ' · ' + u0.short : k) +
+          (RS.mode === 'school' && u0.startDate ? ' <span class="small muted">' + esc(thDate(u0.startDate, true)) + '</span>' : '') + '</h3>' +
+          groups[k].map(function (u) {
+            var id = d.units.indexOf(u);
+            return '<div class="res-unit" data-i="' + id + '"><div><b>' + esc(u.label) + '</b> <span class="small">' + esc(u.members.join(', ')) + '</span>' +
+              '<div class="small muted rs-by">' + (u.medal ? esc('บันทึกโดย ' + u.by + ' · ' + thDateTime(u.at)) : '') + '</div></div>' +
+              '<div class="medal-pick">' + MEDAL_BTNS.map(function (m) {
+                return '<button class="' + m[0] + '" data-m="' + m[0] + '" aria-pressed="' + (u.medal === m[0]) + '">' + m[1] + '</button>';
+              }).join('') + '</div></div>';
+          }).join('') + '</div>';
+      }).join('');
+      box.querySelectorAll('.res-unit').forEach(function (row) {
+        var u = d.units[+row.getAttribute('data-i')];
+        row.querySelectorAll('.medal-pick button').forEach(function (b) {
+          b.onclick = function () {
+            var m = b.getAttribute('data-m'), nm = u.medal === m ? '' : m, btns = row.querySelectorAll('.medal-pick button');
+            btns.forEach(function (x) { x.disabled = true; });
+            http('POST', '/api/admin/competitions/' + A.comp.id + '/results', { event: u.event, school: u.school, unit: u.unit, medal: nm }).then(function (r) {
+              var had = !!u.medal; u.medal = r.medal; u.by = r.by; u.at = r.at;
+              btns.forEach(function (x) { x.disabled = false; x.setAttribute('aria-pressed', x.getAttribute('data-m') === u.medal); });
+              row.querySelector('.rs-by').textContent = u.medal ? 'บันทึกโดย ' + u.by + ' · ' + thDateTime(u.at) : '';
+              var el = document.getElementById('rsDone'); el.textContent = +el.textContent + (u.medal ? 1 : 0) - (had ? 1 : 0);
+              C.toast(u.medal ? 'บันทึก ' + u.school.replace(/^โรงเรียน/, '') + ' · ' + b.textContent : 'ยกเลิกผลแล้ว');
+            }).catch(function (e) { btns.forEach(function (x) { x.disabled = false; }); fail(e); });
+          };
+        });
+      });
+    }).catch(fail);
   }
 
   /* ---------- ประวัติ ---------- */

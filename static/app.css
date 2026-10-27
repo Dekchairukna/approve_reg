@@ -239,3 +239,29 @@ table.t select { min-width: 130px }
 
 .sheet.longsheet { display: block; text-align: left }
 .sheet.longsheet table.long { width: 100% }
+
+/* ---------- ผลการแข่งขัน ---------- */
+.medal{display:inline-block;min-width:54px;padding:2px 10px;border-radius:999px;font-weight:600;font-size:13px;text-align:center;white-space:nowrap}
+.medal.gold{background:#f6d860;color:#5a4300}
+.medal.silver{background:#d9dde3;color:#363c45}
+.medal.bronze{background:#e2a776;color:#4d2608}
+.medal.none{background:transparent;color:inherit;opacity:.65;border:1px dashed currentColor}
+table.medals td.num,table.medals th{text-align:center}
+.res-ev{border:1px solid rgba(127,127,127,.25);border-radius:12px;padding:10px 14px;display:grid;gap:8px}
+.res-ev h3{margin:0}
+.res-row{display:flex;gap:12px;align-items:flex-start}
+.res-row .medal{margin-top:2px}
+.medal-pick{display:flex;flex-wrap:wrap;gap:6px}
+.medal-pick button{border:1px solid rgba(127,127,127,.4);background:transparent;color:inherit;border-radius:999px;padding:5px 12px;font:inherit;font-size:14px;cursor:pointer}
+.medal-pick button[aria-pressed="true"].gold{background:#f6d860;color:#5a4300;border-color:#c9a400}
+.medal-pick button[aria-pressed="true"].silver{background:#d9dde3;color:#363c45;border-color:#8e96a1}
+.medal-pick button[aria-pressed="true"].bronze{background:#e2a776;color:#4d2608;border-color:#a7622c}
+.medal-pick button[aria-pressed="true"].none{background:rgba(127,127,127,.25);border-color:rgba(127,127,127,.7)}
+.medal-pick button:disabled{opacity:.5;cursor:wait}
+.res-unit{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 14px;align-items:center;padding:10px 0;border-top:1px solid rgba(127,127,127,.2)}
+.res-unit:first-of-type{border-top:0}
+@media (max-width:640px){.res-unit{grid-template-columns:1fr}}
+table.ppl{table-layout:fixed}table.ppl th:nth-child(1){width:38%}table.ppl th:nth-child(4){width:110px}
+@media (max-width:640px){table.medals .medal{min-width:0;padding:2px 6px;font-size:12px}table.medals td,table.medals th{padding:6px 4px}
+table.ppl{table-layout:auto}table.ppl th:nth-child(3),table.ppl td:nth-child(3){display:none}}
+.notice{background:rgba(46,160,67,.12);border:1px solid rgba(46,160,67,.45);border-radius:12px;padding:10px 14px}

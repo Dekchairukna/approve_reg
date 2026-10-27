@@ -147,7 +147,7 @@ def delete_comp(cid):
         return err(f"พิมพ์รหัสลิงก์ \"{c['slug']}\" ให้ตรงเพื่อยืนยันการลบ")
     conn = get_db()
     with conn:
-        for t in ('logs', 'confs', 'entries', 'events'):
+        for t in ('ck_results', 'logs', 'confs', 'entries', 'events'):
             conn.execute(f'DELETE FROM {t} WHERE comp_id=?', (cid,))
         conn.execute('DELETE FROM competitions WHERE id=?', (cid,))
     return jsonify(ok=True)
@@ -407,6 +407,159 @@ def rename_athlete(cid):
         conn.execute('INSERT INTO logs (comp_id, at, school, event, action, before, after, staff_user) VALUES (?,?,?,?,?,?,?,?)',
                      (cid, logic.stamp(), school, '', 'แก้ชื่อสะกด', old_name, f'{p}{f} {l}', g.user['username']))
     return jsonify(ok=True, updated=len({r['id'] for r in cur + orig}))
+
+
+@bp.get('/api/admin/competitions/<int:cid>/results')
+@login_required()
+def results_list(cid):
+    """หน่วยที่บันทึกผลได้ ของโรงเรียน (?school=) หรือรายการ (?event=) พร้อมผลที่บันทึกไว้"""
+    _comp_or_404(cid)
+    school, event = request.args.get('school') or None, request.args.get('event') or None
+    if not school and not event:
+        return jsonify(units=[])
+    entries, events, _ = store.load_all(cid)
+    rm = {(r['event'], r['school'], r['unit']): r for r in store.load_results(cid)}
+    units = logic.result_units(entries, events, school=school, event=event)
+    for u in units:
+        r = rm.get((u['event'], u['school'], u['unit']))
+        u['medal'] = r['medal'] if r else ''
+        u['by'] = r['by'] if r else ''
+        u['at'] = r['at'] if r else ''
+    return jsonify(units=units)
+
+
+@bp.post('/api/admin/competitions/<int:cid>/results')
+@login_required()
+def results_save(cid):
+    """บันทึกผล 1 หน่วย: {event, school, unit, medal} (medal ว่าง = ลบผล)"""
+    _comp_or_404(cid)
+    d = request.get_json(silent=True) or {}
+    event, school, unit, medal = (str(d.get(k) or '').strip() for k in ('event', 'school', 'unit', 'medal'))
+    if medal and medal not in logic.MEDALS:
+        return err('ผลไม่ถูกต้อง')
+    entries, events, _ = store.load_all(cid)
+    units = {(u['event'], u['school'], u['unit']): u for u in logic.result_units(entries, events, event=event)}
+    u = units.get((event, school, unit))
+    if not u:
+        return err('ไม่พบทีมนี้ในรายชื่อที่ยืนยันแล้ว กรุณาโหลดหน้าใหม่', 404)
+    conn = get_db()
+    old = conn.execute('SELECT medal FROM ck_results WHERE comp_id=? AND event=? AND school=? AND unit=?',
+                       (cid, event, school, unit)).fetchone()
+    old = old['medal'] if old else ''
+    if medal in logic.MEDAL_MAX and medal != old:
+        n = conn.execute('SELECT COUNT(*) FROM ck_results WHERE comp_id=? AND event=? AND medal=?',
+                         (cid, event, medal)).fetchone()[0]
+        if n >= logic.MEDAL_MAX[medal]:
+            return err(f"รายการ {u['short']} มีเหรียญ{logic.MEDAL_TH[medal]}ครบ {logic.MEDAL_MAX[medal]} ทีมแล้ว "
+                       f"ยกเลิกของทีมเดิมก่อน")
+    who = g.user.get('name') or g.user['username']
+    with conn:
+        if medal:
+            conn.execute('INSERT INTO ck_results (comp_id, event, school, unit, medal, by_user, at) VALUES (?,?,?,?,?,?,?) '
+                         'ON CONFLICT (comp_id, event, school, unit) DO UPDATE SET medal=excluded.medal, '
+                         'by_user=excluded.by_user, at=excluded.at', (cid, event, school, unit, medal, who, logic.stamp()))
+        else:
+            conn.execute('DELETE FROM ck_results WHERE comp_id=? AND event=? AND school=? AND unit=?', (cid, event, school, unit))
+        if medal != old:
+            conn.execute('INSERT INTO logs (comp_id, at, school, event, action, before, after, staff_user) VALUES (?,?,?,?,?,?,?,?)',
+                         (cid, logic.stamp(), school, event, 'บันทึกผล', logic.MEDAL_TH.get(old, ''),
+                          f"{u['label']} · {', '.join(u['members'])} → {logic.MEDAL_TH.get(medal, 'ลบผล')}", g.user['username']))
+    return jsonify(ok=True, medal=medal, by=who if medal else '', at=logic.stamp() if medal else '')
+
+
+@bp.post('/api/admin/competitions/<int:cid>/results/import')
+@login_required()
+def results_import(cid):
+    """นำเข้าผลจาก Excel: คอลัมน์ รายการ | รางวัล | ชื่อ-นามสกุล (1 แถวต่อ 1 คน)
+    ?dry=1 ตรวจอย่างเดียว ไม่บันทึก · รายการที่อยู่ในไฟล์จะถูกแทนที่ผลเดิมทั้งหมด"""
+    from openpyxl import load_workbook
+    _comp_or_404(cid)
+    f = request.files.get('file')
+    if not f or not f.filename:
+        return err('กรุณาเลือกไฟล์ Excel')
+    try:
+        ws = load_workbook(f, read_only=True, data_only=True).worksheets[0]
+        it = ws.iter_rows(values_only=True)
+        head = [str(x or '').strip() for x in next(it)]
+        ci = {k: next((i for i, h in enumerate(head) if h.startswith(k)), None) for k in ('รายการ', 'รางวัล', 'ชื่อ')}
+        gi = next((i for i, h in enumerate(head) if h.startswith('โรงเรียน') or h.startswith('สถาบัน')), None)
+        if None in ci.values():
+            return err('ไฟล์ต้องมีคอลัมน์ รายการ, รางวัล, ชื่อ-นามสกุล')
+        rows = []
+        for line in it:
+            ev, md, nm = (str(line[ci[k]] or '').strip() if ci[k] < len(line) else '' for k in ('รายการ', 'รางวัล', 'ชื่อ'))
+            if not (ev or nm):
+                continue
+            if logic.MEDAL_FROM_TH.get(md) is None:
+                return err(f'รางวัล “{md}” ไม่ถูกต้อง (ใช้ ทอง / เงิน / ทองแดง)')
+            grp = str(line[gi] or '').strip() if gi is not None and gi < len(line) else ''
+            rows.append(dict(event=ev, medal=logic.MEDAL_FROM_TH[md], name=nm, group=grp))
+    except StopIteration:
+        return err('ไฟล์ว่าง')
+    except Exception as e:  # noqa: BLE001
+        return err(f'อ่านไฟล์ไม่ได้: {e}')
+    entries, events, _ = store.load_all(cid)
+    found, problems, notes = logic.match_results(rows, logic.result_units(entries, events))
+    cnt = {}
+    for (ev, _s, _u), (m, _x) in found.items():
+        cnt.setdefault(ev, {}).setdefault(m, 0)
+        cnt[ev][m] += 1
+    for ev, c in cnt.items():
+        for m, n in c.items():
+            if n > logic.MEDAL_MAX[m]:
+                problems.append(f"{ev.replace('เปตอง : ', '')}: เหรียญ{logic.MEDAL_TH[m]} {n} ทีม เกินกำหนด {logic.MEDAL_MAX[m]}")
+    summary = dict(events=len(cnt), units=len(found), problems=problems, fuzzy=notes)
+    if request.args.get('dry') or problems:
+        return jsonify(ok=not problems, saved=False, **summary)
+    who, at = g.user.get('name') or g.user['username'], logic.stamp()
+    conn = get_db()
+    with conn:
+        for ev in cnt:
+            conn.execute('DELETE FROM ck_results WHERE comp_id=? AND event=?', (cid, ev))
+        for (ev, school, unit), (m, u) in found.items():
+            conn.execute('INSERT INTO ck_results (comp_id, event, school, unit, medal, by_user, at) VALUES (?,?,?,?,?,?,?)',
+                         (cid, ev, school, unit, m, who, at))
+        conn.execute('INSERT INTO logs (comp_id, at, school, event, action, before, after, staff_user) VALUES (?,?,?,?,?,?,?,?)',
+                     (cid, at, '', '', 'นำเข้าผล', '', f"{f.filename}: {len(cnt)} รายการ {len(found)} ทีม", g.user['username']))
+    return jsonify(ok=True, saved=True, **summary)
+
+
+@bp.get('/api/admin/competitions/<int:cid>/results.xlsx')
+@login_required()
+def results_excel(cid):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    c = _comp_or_404(cid)
+    entries, events, _ = store.load_all(cid)
+    d = logic.results_public(entries, events, store.load_results(cid))
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'ตามสถาบัน'
+    ws.append(['ระดับ', 'อันดับ', 'โรงเรียน', 'ทอง', 'เงิน', 'ทองแดง', 'รวม'])
+    for lv in [''] + sorted({t['level'] for t in d['table'] if t['level']}):
+        rows = [t for t in d['table'] if t['level'] == lv]
+        for i, t in enumerate(rows, 1):
+            ws.append([lv or 'รวมทุกระดับ', i, t['school'], t['gold'], t['silver'], t['bronze'], t['total']])
+    ws2 = wb.create_sheet('รายบุคคล')
+    ws2.append(['ชื่อ-นามสกุล', 'โรงเรียน', 'ระดับ', 'รายการ', 'ทีม', 'รางวัล'])
+    for p in d['people']:
+        ws2.append([p['name'], p['school'], p['level'], p['short'], p['label'], logic.MEDAL_TH[p['medal']]])
+    ws3 = wb.create_sheet('รายรายการ')
+    ws3.append(['ระดับ', 'รายการ', 'รางวัล', 'โรงเรียน', 'ทีม', 'นักกีฬา'])
+    for ev in d['events']:
+        for u in ev['winners']:
+            ws3.append([ev['level'], ev['short'], logic.MEDAL_TH[u['medal']], u['school'], u['label'], ', '.join(u['members'])])
+    for sh in wb.worksheets:
+        for cell in sh[1]:
+            cell.font = Font(bold=True)
+        sh.freeze_panes = 'A2'
+        for col in sh.columns:
+            sh.column_dimensions[col[0].column_letter].width = min(max(len(str(x.value or '')) for x in col) + 2, 60)
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return send_file(buf, as_attachment=True, download_name=f"ผลการแข่งขัน_{c['slug']}.xlsx",
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
 @bp.get('/api/admin/competitions/<int:cid>/logs')

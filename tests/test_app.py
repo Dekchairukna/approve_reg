@@ -312,3 +312,72 @@ def test_print_selected_events_only(client):
     d = client.post(f'/api/admin/competitions/{cid}/print', headers=H, json={'events': [a]}).json
     evs = {blk['event'] for p in d['pages'] for blk in p['blocks']}
     assert evs == {a}
+
+
+def test_results_medals_table_and_people(client):
+    cid = setup_comp(client)
+    tm, sg = 'เปตอง : ประถมศึกษา ทีม 3 คน ชาย', 'เปตอง : เดี่ยว ประถมศึกษา บุคคล ชาย'
+    assert submit(client, tm)['ok'] and submit(client, tm, 'โรงเรียนบี')['ok'] and submit(client, sg)['ok']
+    url = f'/api/admin/competitions/{cid}/results'
+    units = client.get(url + '?school=โรงเรียนเอ', headers=H).json['units']
+    team = next(u for u in units if u['event'] == tm)
+    assert team['label'] == 'ไม่ระบุคู่/ทีม' or 'ทีม' in team['label']
+    assert len(team['members']) == 2
+    singles = [u for u in units if u['event'] == sg]
+    assert len(singles) == 2 and all(u['label'] == 'บุคคล' for u in singles)
+    b = next(u for u in client.get(url + '?event=' + tm, headers=H).json['units'] if u['school'] == 'โรงเรียนบี')
+    post = lambda u, m: client.post(url, headers=H, json={'event': u['event'], 'school': u['school'], 'unit': u['unit'], 'medal': m})
+    assert post(team, 'gold').json['ok']
+    r = post(b, 'gold')                       # ทองซ้ำในรายการเดียวกันไม่ได้
+    assert r.status_code == 400 and 'ครบ' in r.json['error']
+    assert post(b, 'bronze').json['ok']
+    assert post(singles[0], 'silver').json['ok'] and post(singles[1], 'none').json['ok']
+    assert post(team, 'gold').json['ok']      # บันทึกซ้ำค่าเดิมได้
+    # ยังไม่ล็อกอินก็ดูหน้าผลได้ แต่บันทึกไม่ได้
+    anon = client.application.test_client()
+    assert anon.post(url, headers=H, json={'event': tm, 'school': 'โรงเรียนเอ', 'unit': team['unit'], 'medal': 'gold'}).status_code == 401
+    assert anon.get('/c/test/results').status_code == 200
+    d = anon.get('/api/c/test/results', headers=H).json
+    allv = {t['school']: t for t in d['table'] if t['level'] == ''}
+    assert allv['โรงเรียนเอ']['gold'] == 1 and allv['โรงเรียนเอ']['silver'] == 1 and allv['โรงเรียนเอ']['total'] == 2
+    assert allv['โรงเรียนบี']['bronze'] == 1
+    assert d['table'][0]['school'] == 'โรงเรียนเอ'
+    assert len([p for p in d['people'] if p['event'] == tm and p['school'] == 'โรงเรียนเอ']) == 2   # ทุกคนในทีมได้
+    assert not any(p['medal'] == 'none' for p in d['people'])
+    assert d['progress'] == {'events': 2, 'withResult': 2}
+    assert post(team, '').json['ok']          # ลบผล
+    d = anon.get('/api/c/test/results', headers=H).json
+    assert {t['school']: t for t in d['table'] if t['level'] == ''}['โรงเรียนเอ']['gold'] == 0
+    assert client.get(url + '.xlsx').status_code == 200
+    logs = client.get(f'/api/admin/competitions/{cid}/logs', headers=H).json['logs']
+    assert any(l['action'] == 'บันทึกผล' for l in logs)
+
+
+def test_results_import_by_name(client):
+    cid = setup_comp(client)
+    tm, sg = 'เปตอง : ประถมศึกษา ทีม 3 คน ชาย', 'เปตอง : เดี่ยว ประถมศึกษา บุคคล ชาย'
+    assert submit(client, tm)['ok'] and submit(client, tm, 'โรงเรียนบี')['ok'] and submit(client, sg)['ok']
+
+    def book(rows):
+        wb = Workbook()
+        ws = wb.active
+        ws.append(['รายการ', 'รางวัล', 'ชื่อ-นามสกุล'])
+        for r in rows:
+            ws.append(r)
+        b = io.BytesIO()
+        wb.save(b)
+        b.seek(0)
+        return b
+    url = f'/api/admin/competitions/{cid}/results/import'
+    rows = [[tm, 'ทอง', 'ด.ช.หนึ่ง ทดสอบ'], [tm, 'ทอง', 'สาม ทดสอบ'], [tm, 'เงิน', 'ด.ช.สี่  ทดสอบ'],
+            [sg, 'ชนะเลิศ', 'ด.ช.ขยัน ทดสบ']]            # สะกดผิดเล็กน้อย
+    d = client.post(url + '?dry=1', headers=H, content_type='multipart/form-data', data={'file': (book(rows), 'r.xlsx')}).json
+    assert d['ok'] and not d['saved'] and d['units'] == 3 and d['events'] == 2 and len(d['fuzzy']) == 1
+    d = client.post(url, headers=H, content_type='multipart/form-data', data={'file': (book(rows), 'r.xlsx')}).json
+    assert d['saved']
+    pub = client.get('/api/c/test/results', headers=H).json
+    allv = {t['school']: t for t in pub['table'] if t['level'] == ''}
+    assert allv['โรงเรียนเอ']['gold'] == 2 and allv['โรงเรียนบี']['silver'] == 1
+    bad = client.post(url, headers=H, content_type='multipart/form-data',
+                      data={'file': (book([[tm, 'ทอง', 'ไม่มีคนนี้ เลย']]), 'r.xlsx')}).json
+    assert not bad['ok'] and bad['problems']

@@ -7,7 +7,7 @@ import sqlite3
 
 from flask import current_app, g
 
-TABLES = ['users', 'competitions', 'events', 'entries', 'confs', 'logs']
+TABLES = ['users', 'competitions', 'events', 'entries', 'confs', 'logs', 'ck_results']
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -85,6 +85,16 @@ CREATE TABLE IF NOT EXISTS logs (
   staff_user TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS ix_logs_comp ON logs(comp_id, id);
+CREATE TABLE IF NOT EXISTS ck_results (
+  comp_id INTEGER NOT NULL REFERENCES competitions(id) ON DELETE CASCADE,
+  event TEXT NOT NULL,
+  school TEXT NOT NULL,
+  unit TEXT NOT NULL,                           -- ทีม '1'/'2'/'999' หรือ 'e<รหัส>' สำหรับประเภทเดี่ยว
+  medal TEXT NOT NULL,                          -- gold / silver / bronze / none
+  by_user TEXT NOT NULL DEFAULT '',
+  at TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (comp_id, event, school, unit)
+);
 """
 SQLITE_SCHEMA = _SCHEMA.format(pk='INTEGER PRIMARY KEY AUTOINCREMENT', blob='BLOB')
 PG_SCHEMA = _SCHEMA.format(pk='SERIAL PRIMARY KEY', blob='BYTEA')
