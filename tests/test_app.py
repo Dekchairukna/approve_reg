@@ -303,3 +303,12 @@ def test_checkin_report_excel(client):
     data = [v for v in vals if isinstance(v[0], int)]
     assert len(data) == 2 and data[0][1] == rows[1]['name'] and ':' in data[0][4] and data[1][4] == 'ยังไม่มา'
     assert any('มา 1/2' in str(v[0]) for v in vals)
+
+
+def test_print_selected_events_only(client):
+    cid = setup_comp(client)
+    a, b = 'เปตอง : ประถมศึกษา คู่ ชาย', 'เปตอง : เดี่ยว ประถมศึกษา บุคคล หญิง'
+    assert submit(client, a)['ok'] and submit(client, b)['ok']
+    d = client.post(f'/api/admin/competitions/{cid}/print', headers=H, json={'events': [a]}).json
+    evs = {blk['event'] for p in d['pages'] for blk in p['blocks']}
+    assert evs == {a}

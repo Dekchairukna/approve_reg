@@ -324,6 +324,7 @@ def roster_excel(cid):
     from openpyxl.styles import Font
     c = _comp_or_404(cid)
     f = {k: request.args.get(k, '') for k in ('startDate', 'level', 'category', 'school')}
+    f['events'] = [x for x in request.args.getlist('event') if x]
     entries, events, confs = store.load_all(cid)
     d = logic.print_data(entries, events, confs, f)
     em = {e['event']: e for e in events}

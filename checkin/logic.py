@@ -312,7 +312,9 @@ def overview(entries, events, confs, now, max_events):
 
 def print_data(entries, events, confs, f):
     cm = {(c['school'], c['event']): c for c in confs}
-    evs = [ev for ev in events if (not f.get('startDate') or ev['startDate'] == f['startDate'])
+    want = set(f.get('events') or [])
+    evs = [ev for ev in events if (not want or ev['event'] in want)
+           and (not f.get('startDate') or ev['startDate'] == f['startDate'])
            and (not f.get('level') or ev['level'] == f['level'])
            and (not f.get('category') or ev['category'] == f['category'])]
     pages, skipped = [], []

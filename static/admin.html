@@ -225,36 +225,66 @@
   }
 
   /* ---------- พิมพ์ ---------- */
+  /* เลือกรายการที่จะพิมพ์ แบบเดียวกับหน้ารายงานตัว (เลือกได้หลายรายการ / ทั้งวัน) */
+  var PK = { sel: [] };
+  function pkKey() { return 'pk_evs_' + A.comp.id; }
   function tabPrint() {
-    var dayOpts = C.days(A.events).map(function (d) { return '<option value="' + esc(d.startDate || '') + '">' + thDate(d.startDate) + ' · ' + esc(d.cats.join(', ')) + '</option>'; }).join('');
-    var levels = C.levelsOf(A.events);
-    tabEl().innerHTML = '<div style="display:grid;gap:12px"><p class="small muted" style="margin:0">พิมพ์เฉพาะรายชื่อที่ยืนยันแล้ว (ไม่รวมช่องที่เลือก "ไม่ส่ง") เลือกได้ว่าจะเป็นตารางยาวแยกตามรายการ หรือแยกหน้าตามโรงเรียน</p>' +
-      '<div class="print-controls"><label class="f">วันแข่งขัน<select id="pDay"><option value="">ทุกวัน</option>' + dayOpts + '</select></label>' +
-      '<label class="f">ประเภท<select id="pCat"><option value="">ทุกประเภท</option>' + A.events.map(function (e) { return e.category; }).filter(function (c, i, a) { return a.indexOf(c) === i; })
-        .map(function (c) { return '<option>' + esc(c) + '</option>'; }).join('') + '</select></label>' +
+    var names = A.events.map(function (e) { return e.event; }), saved = [];
+    try { saved = JSON.parse(C.store(pkKey()) || '[]'); } catch (e) { saved = []; }
+    PK.sel = saved.filter(function (n) { return names.indexOf(n) >= 0; });
+    if (!PK.sel.length) {
+      var today = todayBkk();
+      PK.sel = A.events.filter(function (e) { return e.startDate === today; }).map(function (e) { return e.event; });
+    }
+    tabEl().innerHTML = '<div style="display:grid;gap:12px"><p class="small muted" style="margin:0">เลือกรายการที่จะพิมพ์ (เลือกได้หลายรายการ หรือติ๊ก "ทั้งวัน") พิมพ์เฉพาะรายชื่อที่ยืนยันแล้ว ไม่รวมช่องที่เลือก "ไม่ส่ง"</p>' +
+      '<details class="ck-pick" id="pkPick" open><summary id="pkSum"></summary><div id="pkBody"></div></details>' +
+      '<div class="print-controls">' +
       '<label class="f">โรงเรียน<select id="pSchool"><option value="">ทุกโรงเรียน</option>' + A.schools.map(function (s) { return '<option>' + esc(s) + '</option>'; }).join('') + '</select></label>' +
-      '<label class="f">ระดับ<select id="pLevel"><option value="">ทุกระดับ</option>' + levels.map(function (l) { return '<option value="' + esc(l) + '">' + esc(C.levelLabel(l)) + '</option>'; }).join('') + '</select></label>' +
       '<label class="f">รูปแบบ<select id="pMode"><option value="event">ตารางยาว แยกตามรายการ (รวมทุกโรงเรียน)</option><option value="school">แยกหน้าตามโรงเรียน</option></select></label>' +
       '<label class="toggle"><input type="checkbox" id="pBreak"> ขึ้นหน้าใหม่ทุกรายการ (แบบแยกโรงเรียน)</label></div>' +
       '<div class="row"><button class="btn primary" id="pMake">สร้างใบรายงานตัว</button><button class="btn" id="pPrint" hidden>พิมพ์</button>' +
       '<button class="btn" id="pXlsx">ดาวน์โหลดรายชื่อที่ยืนยัน (Excel)</button><span id="pInfo" class="small muted"></span></div>' +
-      '<p class="hint" style="margin:0">ไฟล์ Excel เป็นตารางรายชื่อแยกคอลัมน์ คำนำหน้า / ชื่อ / นามสกุล / ทีม ใช้นำไปลงระบบอื่น เช่นระบบ Shooting (เลือกประเภท "Shooting" ก่อนกด)</p>' +
+      '<p class="hint" style="margin:0">ไฟล์ Excel เป็นตารางรายชื่อแยกคอลัมน์ คำนำหน้า / ชื่อ / นามสกุล / ทีม ของรายการที่เลือก ใช้นำไปลงระบบอื่น เช่นระบบ Shooting</p>' +
       '<div id="pSkipped"></div></div>';
+    drawPrintPicker();
     document.getElementById('pMake').onclick = makePrint;
     document.getElementById('pPrint').onclick = openPrintWindow;
-    document.getElementById('pDay').selectedIndex = A.events.some(function (e) { return e.startDate; }) ? 1 : 0;
     document.getElementById('pXlsx').onclick = function () {
-      var q = ['startDate=' + encodeURIComponent(val('pDay')), 'category=' + encodeURIComponent(document.getElementById('pCat').value),
-        'level=' + encodeURIComponent(document.getElementById('pLevel').value), 'school=' + encodeURIComponent(document.getElementById('pSchool').value)].join('&');
-      location.href = '/api/admin/competitions/' + A.comp.id + '/roster.xlsx?' + q;
+      if (!PK.sel.length) { C.toast('เลือกรายการก่อน'); return; }
+      location.href = '/api/admin/competitions/' + A.comp.id + '/roster.xlsx?' + PK.sel.map(function (n) { return 'event=' + encodeURIComponent(n); })
+        .concat(['school=' + encodeURIComponent(document.getElementById('pSchool').value)]).join('&');
     };
+  }
+  function drawPrintPicker() {
+    var groups = {}, order = [], today = todayBkk();
+    A.events.forEach(function (e) { var d = e.startDate || ''; if (!groups[d]) { groups[d] = []; order.push(d); } groups[d].push(e); });
+    var shorts = A.events.filter(function (e) { return PK.sel.indexOf(e.event) >= 0; }).map(function (e) { return C.levelLabel(e.level) + ' ' + e.short; });
+    document.getElementById('pkSum').innerHTML = '<b>รายการที่จะพิมพ์ (' + PK.sel.length + ')</b> <span class="muted small">' +
+      esc(shorts.length ? (shorts.length > 4 ? shorts.slice(0, 4).join(', ') + ' และอีก ' + (shorts.length - 4) : shorts.join(', ')) : 'ยังไม่ได้เลือก — กดเพื่อเลือก') + '</span>';
+    document.getElementById('pkBody').innerHTML = order.map(function (d, gi) {
+      var evs = groups[d], allOn = evs.every(function (e) { return PK.sel.indexOf(e.event) >= 0; });
+      return '<div class="ck-day"><label class="ck-dayh"><input type="checkbox" data-day="' + gi + '"' + (allOn ? ' checked' : '') + '> <b>' +
+        esc(d ? 'แข่ง ' + thDate(d, true) + (d === today ? ' (วันนี้)' : '') : 'ยังไม่กำหนดวัน') + '</b> <span class="small muted">ทั้งวัน</span></label>' +
+        '<div class="ck-evs">' + evs.map(function (e) {
+          return '<label class="toggle"><input type="checkbox" data-ev="' + esc(e.event) + '"' + (PK.sel.indexOf(e.event) >= 0 ? ' checked' : '') + '> ' +
+            esc(C.levelLabel(e.level) + ' · ' + e.short) + '</label>';
+        }).join('') + '</div></div>';
+    }).join('') + '<div class="row" style="margin-top:6px"><button class="btn" id="pkNone">ล้างที่เลือก</button><button class="btn primary" id="pkDone">ตกลง</button></div>';
+    var body = document.getElementById('pkBody');
+    var setSel = function (name, on) { var i = PK.sel.indexOf(name); if (on && i < 0) PK.sel.push(name); else if (!on && i >= 0) PK.sel.splice(i, 1); };
+    var save = function () { C.store(pkKey(), JSON.stringify(PK.sel)); hidePrint(); drawPrintPicker(); };
+    body.querySelectorAll('input[data-ev]').forEach(function (cb) { cb.onchange = function () { setSel(cb.getAttribute('data-ev'), cb.checked); save(); }; });
+    body.querySelectorAll('input[data-day]').forEach(function (cb) { cb.onchange = function () { groups[order[+cb.getAttribute('data-day')]].forEach(function (e) { setSel(e.event, cb.checked); }); save(); }; });
+    document.getElementById('pkNone').onclick = function () { PK.sel = []; save(); };
+    document.getElementById('pkDone').onclick = function () { document.getElementById('pkPick').open = false; };
   }
   function sheetHeader() {
     var c = A.comp;
     return (c.logo ? '<img src="' + esc(location.origin + c.logo) + '" alt="" class="plogo">' : '') + '<h2>ใบรายงานตัวนักกีฬา</h2><div>' + esc(c.name + (c.sport ? ' · กีฬา' + c.sport : '')) + '</div>';
   }
   function makePrint() {
-    var f = { startDate: val('pDay'), school: document.getElementById('pSchool').value, level: document.getElementById('pLevel').value, category: document.getElementById('pCat').value };
+    if (!PK.sel.length) { C.toast('เลือกรายการที่จะพิมพ์ก่อน'); document.getElementById('pkPick').open = true; return; }
+    var f = { events: PK.sel.slice(), school: document.getElementById('pSchool').value };
     var brk = document.getElementById('pBreak').checked;
     document.getElementById('pInfo').textContent = 'กำลังสร้าง…';
     var mode = document.getElementById('pMode').value;
