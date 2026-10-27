@@ -16,6 +16,14 @@
       });
     });
   }
+  /* แถบสลับหน้าสาธารณะของงาน */
+  function pageNav(slug, cur) {
+    var b = '/c/' + encodeURIComponent(slug), el = document.getElementById('pagenav');
+    if (!el) return;
+    el.innerHTML = [[b, 'confirm', 'ยืนยันรายชื่อนักกีฬา'], [b + '/roster', 'roster', 'รายชื่อที่ยืนยันลงแข่ง'], [b + '/results', 'results', 'ผลการแข่งขัน']].map(function (x) {
+      return '<a href="' + x[0] + '"' + (x[1] === cur ? ' aria-current="page"' : '') + '>' + x[2] + '</a>';
+    }).join('');
+  }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function norm(s) { return String(s == null ? '' : s).replace(/[\s\u200b\u200c\u200d\ufeff]+/g, ''); }
   function toMs(s) {
@@ -67,5 +75,5 @@
   }
 
   window.C = { http: http, esc: esc, norm: norm, toMs: toMs, thDate: thDate, thDateTime: thDateTime, left: left,
-    toast: toast, levelLabel: levelLabel, levelsOf: levelsOf, store: store, logoHtml: logoHtml, days: days };
+    toast: toast, pageNav: pageNav, levelLabel: levelLabel, levelsOf: levelsOf, store: store, logoHtml: logoHtml, days: days };
 })();

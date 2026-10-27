@@ -381,3 +381,15 @@ def test_results_import_by_name(client):
     bad = client.post(url, headers=H, content_type='multipart/form-data',
                       data={'file': (book([[tm, 'ทอง', 'ไม่มีคนนี้ เลย']]), 'r.xlsx')}).json
     assert not bad['ok'] and bad['problems']
+
+
+def test_public_roster_only_confirmed(client):
+    setup_comp(client)
+    tm = 'เปตอง : ประถมศึกษา ทีม 3 คน ชาย'
+    assert submit(client, tm)['ok']
+    anon = client.application.test_client()
+    assert anon.get('/c/test/roster').status_code == 200
+    d = anon.get('/api/c/test/roster', headers=H).json
+    ev = next(e for e in d['events'] if e['event'] == tm)
+    assert {r['school'] for r in ev['rows']} == {'โรงเรียนเอ'}          # โรงเรียนบียังไม่ยืนยัน
+    assert all('phone' not in r and 'by' not in r for r in ev['rows'])

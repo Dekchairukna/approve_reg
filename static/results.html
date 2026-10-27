@@ -7,6 +7,10 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Kanit:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&family=Sarabun:wght@400;600;700&display=swap">
 <link rel="stylesheet" href="/static/app.css">
+<style>.printonly { display: none }
+@media print { body > main#results-main { display: block !important } main .wrap { max-width: none; padding: 0 } @page { size: A4; margin: 12mm 10mm } .printonly { display: block !important }
+  .res-evs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: start } .res-ev { align-content: start } .res-ev { break-inside: avoid } table.medals tr { break-inside: avoid } table.medals thead { display: table-header-group }
+  .medal, .dot { -webkit-print-color-adjust: exact; print-color-adjust: exact } }</style>
 </head>
 <body>
 <header class="band">
@@ -18,7 +22,7 @@
     <nav class="nav pagenav" id="pagenav"></nav>
   </div>
 </header>
-<main><div class="wrap" id="app"><div class="loading">กำลังโหลด…</div></div></main>
+<main id="results-main"><div class="wrap" id="app"><div class="loading">กำลังโหลด…</div></div></main>
 <div class="toast" id="toast" hidden></div>
 
 <script src="/static/common.js"></script>
@@ -27,19 +31,13 @@
   var esc = C.esc, app = document.getElementById('app');
   var slug = decodeURIComponent(location.pathname.split('/')[2] || '');
   var MED = { gold: 'ทอง', silver: 'เงิน', bronze: 'ทองแดง' };
-  var R = { d: null, tab: 'school', level: '', q: '', evLevel: '' };
+  var R = { d: null, tab: 'school', level: '', q: '', evSel: [] };
   try { R.tab = C.store('res_tab') || 'school'; } catch (e) {}
 
   function medal(m) { return '<span class="medal ' + m + '">' + MED[m] + '</span>'; }
   function shortSchool(s) { return (s || '').replace(/^โรงเรียน/, ''); }
 
-  function pageNav(slug, cur) {
-    var b = '/c/' + encodeURIComponent(slug);
-    document.getElementById('pagenav').innerHTML = [[b, 'confirm', 'ยืนยันรายชื่อนักกีฬา'], [b + '/results', 'results', 'ผลการแข่งขัน']].map(function (x) {
-      return '<a href="' + x[0] + '"' + (x[1] === cur ? ' aria-current="page"' : '') + '>' + x[2] + '</a>';
-    }).join('');
-  }
-  pageNav(slug, 'results');
+  C.pageNav(slug, 'results');
   function load() {
     C.http('GET', '/api/c/' + encodeURIComponent(slug) + '/results').then(function (d) {
       R.d = d;
@@ -50,67 +48,101 @@
     }).catch(function (e) { app.innerHTML = '<div class="errors">' + esc((e && e.message) || e) + '</div>'; });
   }
 
+  var TABS = [['school', 'ตามสถาบัน'], ['person', 'รายบุคคล'], ['event', 'รายรายการ']];
   function draw() {
     var d = R.d, p = d.progress;
-    var tabs = [['school', 'ตามสถาบัน'], ['person', 'รายบุคคล'], ['event', 'รายรายการ']];
     app.innerHTML = '<section class="card" style="display:grid;gap:12px">' +
-      '<div class="row between"><span class="small muted">บันทึกผลแล้ว ' + p.withResult + ' / ' + p.events + ' รายการ · ข้อมูล ณ ' +
-      new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.</span><button class="btn" id="rf">รีเฟรช</button></div>' +
-      '<div class="subtabs" role="tablist">' + tabs.map(function (t) { return '<button role="tab" data-t="' + t[0] + '" aria-selected="' + (t[0] === R.tab) + '">' + t[1] + '</button>'; }).join('') + '</div>' +
+      '<div class="row between noprint"><span class="small muted">บันทึกผลแล้ว ' + p.withResult + ' / ' + p.events + ' รายการ · ข้อมูล ณ ' +
+      new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.</span><div class="row"><button class="btn" id="pr">พิมพ์</button><button class="btn" id="rf">รีเฟรช</button></div></div>' +
+      '<div class="subtabs noprint" role="tablist">' + TABS.map(function (t) { return '<button role="tab" data-t="' + t[0] + '" aria-selected="' + (t[0] === R.tab) + '">' + t[1] + '</button>'; }).join('') + '</div>' +
+      '<div id="filters" class="noprint" style="display:grid;gap:8px"></div>' +
+      '<div id="ptitle" class="printonly"></div>' +
       '<div id="body"></div></section>';
     document.getElementById('rf').onclick = load;
+    document.getElementById('pr').onclick = function () { window.print(); };
     app.querySelectorAll('.subtabs button').forEach(function (b) {
       b.onclick = function () { R.tab = b.getAttribute('data-t'); C.store('res_tab', R.tab); draw(); };
     });
+    drawFilters();
+    redraw();
+  }
+  function redraw() {
     ({ school: drawSchool, person: drawPerson, event: drawEvent }[R.tab] || drawSchool)();
+    var lv = R.level ? 'ระดับ' + R.level : 'ทุกระดับ', evs = selEvents();
+    document.getElementById('ptitle').innerHTML = '<h2 style="margin:0">ผลการแข่งขัน' + esc(R.d.comp.sport ? ' ' + R.d.comp.sport : '') + ' · ' +
+      esc(TABS.filter(function (t) { return t[0] === R.tab; })[0][1]) + '</h2><div class="small">' + esc(R.d.comp.name) + '</div>' +
+      '<div class="small">' + esc(lv + ' · ' + (R.evSel.length ? evs.map(function (e) { return (R.level ? '' : C.levelLabel(e.level) + ' ') + e.short; }).join(', ') : 'ทุกรายการ')) + '</div>';
   }
 
-  function levelBtns(cur, key) {
-    var lvs = []; R.d.events.forEach(function (e) { if (e.level && lvs.indexOf(e.level) < 0) lvs.push(e.level); });
-    R.d.table.forEach(function (t) { if (t.level && lvs.indexOf(t.level) < 0) lvs.push(t.level); });
-    if (lvs.length < 2) return '';
-    return '<div class="ck-filter" role="group" data-k="' + key + '">' + [['', 'ทุกระดับ']].concat(lvs.map(function (l) { return [l, C.levelLabel(l)]; })).map(function (l) {
-      return '<button data-l="' + esc(l[0]) + '" aria-pressed="' + (cur === l[0]) + '">' + esc(l[1]) + '</button>';
-    }).join('') + '</div>';
+  /* ตัวกรองร่วมทุกแท็บ: ระดับ + เลือกรายการ (เลือกได้หลายรายการ) */
+  function levelEvents() { return R.d.events.filter(function (e) { return !R.level || e.level === R.level; }); }
+  function selEvents() {
+    var all = levelEvents();
+    R.evSel = (R.evSel || []).filter(function (n) { return all.some(function (e) { return e.event === n; }); });
+    return R.evSel.length ? all.filter(function (e) { return R.evSel.indexOf(e.event) >= 0; }) : all;
   }
-  function bindLevels(key, fn) {
-    document.querySelectorAll('[data-k="' + key + '"] button').forEach(function (b) { b.onclick = function () { R[key] = b.getAttribute('data-l'); fn(); }; });
+  function drawFilters() {
+    var lvs = []; R.d.events.forEach(function (e) { if (e.level && lvs.indexOf(e.level) < 0) lvs.push(e.level); });
+    var all = levelEvents(); selEvents();
+    document.getElementById('filters').innerHTML =
+      (lvs.length > 1 ? '<div class="ck-filter" role="group" id="lv">' + [['', 'ทุกระดับ']].concat(lvs.map(function (l) { return [l, C.levelLabel(l)]; })).map(function (l) {
+        return '<button data-l="' + esc(l[0]) + '" aria-pressed="' + (R.level === l[0]) + '">' + esc(l[1]) + '</button>'; }).join('') + '</div>' : '') +
+      (all.length ? '<div class="evchips" role="group" aria-label="เลือกรายการ"><button data-ev="" aria-pressed="' + !R.evSel.length + '">ทุกรายการ</button>' +
+        all.map(function (e) {
+          return '<button data-ev="' + esc(e.event) + '" aria-pressed="' + (R.evSel.indexOf(e.event) >= 0) + '">' + esc((R.level ? '' : C.levelLabel(e.level) + ' ') + e.short) + '</button>';
+        }).join('') + '</div>' : '');
+    document.querySelectorAll('#lv button').forEach(function (b) { b.onclick = function () { R.level = b.getAttribute('data-l'); drawFilters(); redraw(); }; });
+    document.querySelectorAll('#filters .evchips button').forEach(function (b) {
+      b.onclick = function () {
+        var n = b.getAttribute('data-ev'), i = R.evSel.indexOf(n);
+        if (!n) R.evSel = []; else if (i >= 0) R.evSel.splice(i, 1); else R.evSel.push(n);
+        drawFilters(); redraw();
+      };
+    });
   }
   var body = function () { return document.getElementById('body'); };
   var empty = '<p class="muted">ยังไม่มีการบันทึกผลการแข่งขัน</p>';
+  function rankBy(list) {
+    list.sort(function (a, b) { return b.gold - a.gold || b.silver - a.silver || b.bronze - a.bronze || (a.name || a.school).localeCompare(b.name || b.school, 'th'); });
+    var prev = null, rank = 0;
+    list.forEach(function (x, i) { x.total = x.gold + x.silver + x.bronze; var k = x.gold + '-' + x.silver + '-' + x.bronze; if (k !== prev) { rank = i + 1; prev = k; } x.rank = rank; });
+    return list;
+  }
 
   function drawSchool() {
-    var rows = R.d.table.filter(function (t) { return t.level === R.level; });
-    var sum = { gold: 0, silver: 0, bronze: 0, total: 0 }, prev = null, rank = 0;
-    body().innerHTML = '<div style="display:grid;gap:10px">' + levelBtns(R.level, 'level') +
-      (rows.length ? '<div class="tbl-wrap"><table class="t medals"><thead><tr><th>อันดับ</th><th style="text-align:left">สถาบัน</th><th>' + medal('gold') + '</th><th>' + medal('silver') + '</th><th>' + medal('bronze') + '</th><th>รวม</th></tr></thead><tbody>' +
-        rows.map(function (t, i) {
-          var key = t.gold + '-' + t.silver + '-' + t.bronze;
-          if (key !== prev) { rank = i + 1; prev = key; }
+    var m = {}, rows = [];
+    selEvents().forEach(function (e) {
+      e.winners.forEach(function (u) {
+        if (!m[u.school]) { m[u.school] = { school: u.school, gold: 0, silver: 0, bronze: 0 }; rows.push(m[u.school]); }
+        m[u.school][u.medal]++;
+      });
+    });
+    rankBy(rows);
+    var sum = { gold: 0, silver: 0, bronze: 0, total: 0 };
+    body().innerHTML = rows.length ? '<div class="tbl-wrap"><table class="t medals"><thead><tr><th>อันดับ</th><th style="text-align:left">สถาบัน</th><th>' + medal('gold') + '</th><th>' + medal('silver') + '</th><th>' + medal('bronze') + '</th><th>รวม</th></tr></thead><tbody>' +
+        rows.map(function (t) {
           ['gold', 'silver', 'bronze', 'total'].forEach(function (k) { sum[k] += t[k]; });
-          return '<tr><td class="num">' + rank + '</td><td>' + esc(shortSchool(t.school)) + '</td><td class="num">' + t.gold + '</td><td class="num">' + t.silver + '</td><td class="num">' + t.bronze + '</td><td class="num"><b>' + t.total + '</b></td></tr>';
+          return '<tr><td class="num">' + t.rank + '</td><td>' + esc(shortSchool(t.school)) + '</td><td class="num">' + t.gold + '</td><td class="num">' + t.silver + '</td><td class="num">' + t.bronze + '</td><td class="num"><b>' + t.total + '</b></td></tr>';
         }).join('') + '</tbody><tfoot><tr><th></th><th style="text-align:left">รวม</th><th class="num">' + sum.gold + '</th><th class="num">' + sum.silver + '</th><th class="num">' + sum.bronze + '</th><th class="num">' + sum.total + '</th></tr></tfoot></table></div>' +
-        '<p class="hint" style="margin:0">นับเหรียญต่อทีม/คู่ (ไม่นับซ้ำตามจำนวนคน) เรียงตามเหรียญทอง เงิน ทองแดง</p>' : empty) + '</div>';
-    bindLevels('level', drawSchool);
+        '<p class="hint" style="margin:10px 0 0">นับเหรียญต่อทีม/คู่ (ไม่นับซ้ำตามจำนวนคน) เรียงตามเหรียญทอง เงิน ทองแดง</p>' : empty;
   }
 
   function drawPerson() {
-    var q = R.q.trim().toLowerCase(), map = {}, list = [];
+    var q = R.q.trim().toLowerCase(), map = {}, list = [], want = {};
+    selEvents().forEach(function (e) { want[e.event] = 1; });
     R.d.people.forEach(function (p) {
-      if (R.level && p.level !== R.level) return;
+      if (!want[p.event]) return;
       var k = p.school + '|' + p.name.replace(/\s+/g, '');
       if (!map[k]) { map[k] = { name: p.name, school: p.school, gold: 0, silver: 0, bronze: 0, items: [] }; list.push(map[k]); }
       map[k][p.medal]++; map[k].items.push(p);
     });
     var ord = { gold: 0, silver: 1, bronze: 2 };
-    list.forEach(function (x) { x.total = x.gold + x.silver + x.bronze; x.items.sort(function (a, b) { return ord[a.medal] - ord[b.medal]; }); });
-    list.sort(function (a, b) { return b.gold - a.gold || b.silver - a.silver || b.bronze - a.bronze || a.name.localeCompare(b.name, 'th'); });
-    var prev = null, rank = 0;
-    list.forEach(function (x, i) { var key = x.gold + '-' + x.silver + '-' + x.bronze; if (key !== prev) { rank = i + 1; prev = key; } x.rank = rank; });
+    list.forEach(function (x) { x.items.sort(function (a, b) { return ord[a.medal] - ord[b.medal]; }); });
+    rankBy(list);
     var shown = list.filter(function (x) {
       return !q || (x.name + ' ' + x.school + ' ' + x.items.map(function (p) { return p.short; }).join(' ')).toLowerCase().indexOf(q) >= 0;
     });
-    body().innerHTML = '<div style="display:grid;gap:10px"><div class="row"><input type="search" id="q" placeholder="ค้นหาชื่อนักกีฬา โรงเรียน หรือรายการ" value="' + esc(R.q) + '" style="flex:1;min-width:180px">' + levelBtns(R.level, 'level') + '</div>' +
+    body().innerHTML = '<div style="display:grid;gap:10px"><input class="noprint" type="search" id="q" placeholder="ค้นหาชื่อนักกีฬา โรงเรียน หรือรายการ" value="' + esc(R.q) + '">' +
       (shown.length ? '<div class="tbl-wrap"><table class="t medals pmed"><thead><tr><th>อันดับ</th><th style="text-align:left">ชื่อ-นามสกุล</th><th>' + medal('gold') + '</th><th>' + medal('silver') + '</th><th>' + medal('bronze') + '</th><th>รวม</th></tr></thead><tbody>' +
         shown.map(function (x) {
           return '<tr><td class="num">' + x.rank + '</td><td><b>' + esc(x.name) + '</b><div class="small muted">' + esc(shortSchool(x.school)) + '</div>' +
@@ -121,20 +153,17 @@
         : (list.length ? '<p class="muted">ไม่พบรายชื่อที่ค้นหา</p>' : empty)) + '</div>';
     var inp = document.getElementById('q');
     inp.oninput = function () { R.q = this.value; var pos = this.selectionStart; drawPerson(); var n = document.getElementById('q'); n.focus(); n.setSelectionRange(pos, pos); };
-    bindLevels('level', drawPerson);
   }
 
   function drawEvent() {
-    var evs = R.d.events.filter(function (e) { return !R.level || e.level === R.level; });
-    body().innerHTML = '<div style="display:grid;gap:10px">' + levelBtns(R.level, 'level') +
-      (evs.length ? evs.map(function (e) {
+    var evs = selEvents();
+    body().innerHTML = evs.length ? '<div class="res-evs">' + evs.map(function (e) {
         return '<div class="res-ev"><h3>' + esc(C.levelLabel(e.level) + ' · ' + e.short) + (e.startDate ? ' <span class="small muted">' + esc(C.thDate(e.startDate)) + '</span>' : '') + '</h3>' +
           e.winners.map(function (u) {
             return '<div class="res-row">' + medal(u.medal) + '<div><b>' + esc(shortSchool(u.school)) + '</b>' + (u.label !== 'บุคคล' ? ' <span class="small muted">' + esc(u.label) + '</span>' : '') +
               '<div class="small">' + esc(u.members.join(', ')) + '</div></div></div>';
           }).join('') + '</div>';
-      }).join('') : empty) + '</div>';
-    bindLevels('level', drawEvent);
+      }).join('') + '</div>' : empty;
   }
 
   load();

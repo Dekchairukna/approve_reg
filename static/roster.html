@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>รายชื่อนักกีฬาที่ยืนยันลงแข่ง</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Kanit:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&family=Sarabun:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="/static/app.css">
+<style>@media print { body > main#roster-main { display: block !important } main .wrap { max-width: none; padding: 0 } @page { size: A4; margin: 12mm 10mm } .printonly { display: block !important } }
+.printonly { display: none }</style>
+</head>
+<body>
+<header class="band">
+  <div class="wrap">
+    <div class="band-top">
+      <div class="brand" id="brand"><div class="logo-ph"></div><div><div class="games">&nbsp;</div><h1>รายชื่อนักกีฬาที่ยืนยันลงแข่ง</h1></div></div>
+      <div class="staffbar" id="staffbar"></div>
+    </div>
+    <nav class="nav pagenav" id="pagenav"></nav>
+  </div>
+</header>
+<main id="roster-main"><div class="wrap" id="app"><div class="loading">กำลังโหลด…</div></div></main>
+<div class="toast" id="toast" hidden></div>
+
+<script src="/static/common.js"></script>
+<script>
+(function () {
+  var esc = C.esc, app = document.getElementById('app');
+  var slug = decodeURIComponent(location.pathname.split('/')[2] || '');
+  var R = { d: null, sel: [], q: '' };
+  var KEY = 'roster_sel_' + slug;
+  C.pageNav(slug, 'roster');
+
+  function shortSchool(s) { return (s || '').replace(/^โรงเรียน/, ''); }
+  function todayBkk() { return new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10); }
+  function save() { try { C.store(KEY, JSON.stringify(R.sel)); } catch (e) {} }
+
+  function load() {
+    C.http('GET', '/api/c/' + encodeURIComponent(slug) + '/roster').then(function (d) {
+      R.d = d;
+      var c = d.comp;
+      document.title = 'รายชื่อนักกีฬา · ' + c.name;
+      document.getElementById('brand').innerHTML = C.logoHtml(c, 'logo') + '<div><div class="games">' + esc(c.name) + '</div><h1>รายชื่อนักกีฬาที่ยืนยันลงแข่ง' + esc(c.sport ? ' ' + c.sport : '') + '</h1></div>';
+      var names = d.events.map(function (e) { return e.event; }), saved = [];
+      try { saved = JSON.parse(C.store(KEY) || '[]'); } catch (e) { saved = []; }
+      R.sel = saved.filter(function (n) { return names.indexOf(n) >= 0; });
+      if (!R.sel.length) R.sel = d.events.filter(function (e) { return e.startDate === todayBkk(); }).map(function (e) { return e.event; });
+      draw();
+    }).catch(function (e) { app.innerHTML = '<div class="errors">' + esc((e && e.message) || e) + '</div>'; });
+  }
+
+  function draw() {
+    var groups = {}, order = [], today = todayBkk();
+    R.d.events.forEach(function (e) { var k = e.startDate || ''; if (!groups[k]) { groups[k] = []; order.push(k); } groups[k].push(e); });
+    app.innerHTML = '<section class="card" style="display:grid;gap:12px">' +
+      '<div class="noprint" style="display:grid;gap:10px">' + order.map(function (d, gi) {
+        var evs = groups[d], allOn = evs.every(function (e) { return R.sel.indexOf(e.event) >= 0; });
+        return '<div class="rs-day"><div class="row between"><b>' + esc(d ? 'แข่ง ' + C.thDate(d, true) + (d === today ? ' (วันนี้)' : '') : 'ยังไม่กำหนดวัน') + '</b>' +
+          '<button class="btn link" data-day="' + gi + '">' + (allOn ? 'ยกเลิกทั้งวัน' : 'เลือกทั้งวัน') + '</button></div>' +
+          '<div class="evchips">' + evs.map(function (e) {
+            return '<button data-ev="' + esc(e.event) + '" aria-pressed="' + (R.sel.indexOf(e.event) >= 0) + '">' + esc(C.levelLabel(e.level) + ' ' + e.short) + '</button>';
+          }).join('') + '</div></div>';
+      }).join('') +
+      '<div class="row"><input type="search" id="q" placeholder="ค้นหาชื่อนักกีฬาหรือโรงเรียน" value="' + esc(R.q) + '" style="flex:1;min-width:180px">' +
+      '<button class="btn" id="pr">พิมพ์</button></div></div>' +
+      '<div id="list"></div></section>';
+    app.querySelectorAll('.evchips button').forEach(function (b) {
+      b.onclick = function () {
+        var n = b.getAttribute('data-ev'), i = R.sel.indexOf(n);
+        if (i >= 0) R.sel.splice(i, 1); else R.sel.push(n);
+        save(); draw();
+      };
+    });
+    app.querySelectorAll('[data-day]').forEach(function (b) {
+      b.onclick = function () {
+        var evs = groups[order[+b.getAttribute('data-day')]], allOn = evs.every(function (e) { return R.sel.indexOf(e.event) >= 0; });
+        evs.forEach(function (e) { var i = R.sel.indexOf(e.event); if (allOn && i >= 0) R.sel.splice(i, 1); if (!allOn && i < 0) R.sel.push(e.event); });
+        save(); draw();
+      };
+    });
+    document.getElementById('q').oninput = function () { R.q = this.value; drawList(); };
+    document.getElementById('pr').onclick = function () { window.print(); };
+    drawList();
+  }
+
+  function drawList() {
+    var q = R.q.trim().toLowerCase().replace(/\s+/g, '');
+    var evs = R.d.events.filter(function (e) { return R.sel.indexOf(e.event) >= 0; });
+    var box = document.getElementById('list');
+    if (!evs.length) { box.innerHTML = '<p class="muted">เลือกรายการด้านบนเพื่อดูรายชื่อ</p>'; return; }
+    var html = evs.map(function (e) {
+      var rows = e.rows.filter(function (r) { return !q || (r.name + r.school).toLowerCase().replace(/\s+/g, '').indexOf(q) >= 0; });
+      if (q && !rows.length) return '';
+      // จัดกลุ่ม: โรงเรียน → ทีม
+      var sch = [], sm = {};
+      rows.forEach(function (r) {
+        if (!sm[r.school]) { sm[r.school] = { school: r.school, teams: [], tm: {} }; sch.push(sm[r.school]); }
+        var s = sm[r.school];
+        if (!s.tm[r.team]) { s.tm[r.team] = { label: r.label, names: [] }; s.teams.push(s.tm[r.team]); }
+        s.tm[r.team].names.push(r.name);
+      });
+      var nTeams = sch.reduce(function (a, s) { return a + s.teams.length; }, 0);
+      var body = sch.map(function (s, si) {
+        var span = s.teams.reduce(function (a, t) { return a + t.names.length; }, 0), out = '';
+        s.teams.forEach(function (t, ti) {
+          t.names.forEach(function (n, ni) {
+            out += '<tr>' + (ti === 0 && ni === 0 ? '<td class="num" rowspan="' + span + '">' + (si + 1) + '</td><td rowspan="' + span + '">' + esc(shortSchool(s.school)) + '</td>' : '') +
+              (ni === 0 ? '<td rowspan="' + t.names.length + '">' + esc(t.label.replace('คู่ที่', 'ทีมที่').replace('ไม่ระบุคู่', 'ไม่ระบุทีม')) + '</td>' : '') +
+              '<td class="nm">' + esc(n) + '</td></tr>';
+          });
+        });
+        return out;
+      }).join('');
+      return '<div class="rs-ev"><h3>' + esc(C.levelLabel(e.level) + ' · ' + e.short) + ' <span class="small muted">' +
+        esc((e.startDate ? C.thDate(e.startDate) + ' · ' : '') + sch.length + ' โรงเรียน · ' + nTeams + (e.category === 'เดี่ยว' || e.category === 'Shooting' ? ' คน' : ' ทีม') + ' · นักกีฬา ' + rows.length + ' คน') + '</span></h3>' +
+        (rows.length ? '<div class="tbl-wrap"><table class="t roster"><thead><tr><th>ที่</th><th>โรงเรียน</th><th>ทีม</th><th>ชื่อ-นามสกุล</th></tr></thead><tbody>' + body + '</tbody></table></div>'
+          : '<p class="muted small">ยังไม่มีรายชื่อที่ยืนยัน</p>') + '</div>';
+    }).join('');
+    box.innerHTML = html ? '<h2 class="printonly" style="margin:0 0 4px">รายชื่อนักกีฬาที่ยืนยันลงแข่ง ' + esc(R.d.comp.sport || '') + '</h2><div class="printonly small">' + esc(R.d.comp.name) + '</div>' + html : '<p class="muted">ไม่พบรายชื่อที่ค้นหา</p>';
+  }
+
+  load();
+})();
+</script>
+</body>
+</html>

@@ -54,6 +54,31 @@ def results_api(slug):
     return jsonify(comp=store.comp_public(c), **logic.results_public(entries, events, store.load_results(c['id'])))
 
 
+@bp.get('/c/<slug>/roster')
+def roster_page(slug):
+    _comp(slug)
+    return static_page('roster.html')
+
+
+@bp.get('/api/c/<slug>/roster')
+def roster_api(slug):
+    """รายชื่อนักกีฬาที่ยืนยันลงแข่ง (รวมที่ยืนยันอัตโนมัติหลังเวลาปิด) แยกตามรายการ — ไม่มีชื่อ/เบอร์ผู้ยืนยัน"""
+    c = _comp(slug)
+    entries, events, _ = store.load_all(c['id'])
+    by_ev = {}
+    for e in sorted(entries, key=lambda e: (e['school'], logic.team_sort(e))):
+        if e['status'] == logic.OK:
+            by_ev.setdefault(e['event'], []).append(e)
+    out = []
+    for ev in events:
+        rows = by_ev.get(ev['event'], [])
+        out.append(dict(event=ev['event'], short=ev['short'], level=ev['level'], category=ev['category'],
+                        startDate=ev['startDate'],
+                        rows=[dict(school=e['school'], team=str(e['team']), label=logic.team_label(e['team'], ev['category']),
+                                   name=f"{e['prefix']}{e['first']} {e['last']}") for e in rows]))
+    return jsonify(comp=store.comp_public(c), events=out)
+
+
 @bp.get('/logo/<int:cid>')
 def logo(cid):
     r = get_db().execute('SELECT logo_mime, logo_data FROM competitions WHERE id=?', (cid,)).fetchone()

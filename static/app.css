@@ -274,3 +274,25 @@ table.pmed td:nth-child(2){text-align:left}
 .nav a:hover { color: var(--band-ink) }
 .nav a[aria-current="page"] { background: rgba(255,255,255,.12); color: var(--band-ink); font-weight: 600 }
 .pagenav { margin-top: 10px }
+.evchips{display:flex;flex-wrap:wrap;gap:6px}
+.evchips button{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;padding:5px 12px;font:inherit;font-size:13.5px;cursor:pointer}
+.evchips button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+/* ---------- รายชื่อที่ยืนยันลงแข่ง ---------- */
+.rs-day{display:grid;gap:6px}
+.rs-ev{display:grid;gap:6px;margin-top:8px}
+.rs-ev h3{margin:6px 0 0}
+table.roster{border-collapse:collapse}
+table.roster th,table.roster td{text-align:center;vertical-align:middle;border:1px solid var(--line)}
+table.roster td.nm{text-align:left}
+table.roster th:nth-child(1){width:44px}table.roster th:nth-child(3){width:96px}
+@media print{
+  .band,.noprint,.toast{display:none!important}
+  body{background:#fff}.card{border:0;box-shadow:none;padding:0}
+  .rs-ev{break-inside:auto}.rs-ev h3{break-after:avoid}
+  table.roster tr{break-inside:avoid}table.roster thead{display:table-header-group}
+  .tbl-wrap{overflow:visible}
+}
+table.roster{table-layout:fixed;width:100%}
+table.roster th:nth-child(2){width:36%}
+@media (min-width:700px){table.roster td.nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+@media (max-width:640px){table.roster th:nth-child(1){width:30px}table.roster th:nth-child(3){width:64px}table.roster th:nth-child(2){width:32%}table.roster td,table.roster th{padding:6px 4px;font-size:13px}}
