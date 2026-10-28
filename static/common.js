@@ -50,6 +50,37 @@
     t.textContent = msg; t.hidden = false;
     clearTimeout(toast._t); toast._t = setTimeout(function () { t.hidden = true; }, 3500);
   }
+  /* บันทึกเป็นไฟล์ PDF (โหลด html2pdf จาก CDN เมื่อกดครั้งแรก) */
+  var H2P = window.__H2P_URL ? [window.__H2P_URL] : ['https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js',
+    'https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js'];
+  function loadScript(urls) {
+    if (window.html2pdf) return Promise.resolve();
+    return urls.reduce(function (p, u) {
+      return p.catch(function () {
+        return new Promise(function (ok, bad) { var s = document.createElement('script'); s.src = u; s.onload = ok; s.onerror = bad; document.head.appendChild(s); });
+      });
+    }, Promise.reject());
+  }
+  /* html2canvas ตัดบรรทัดภาษาไทยเพี้ยน (ข้อความซ้อนกัน) — แทรกจุดตัดคำ (ZWSP) ระหว่างคำไทยในสำเนาก่อนสร้าง PDF */
+  function zws(root){if(!window.Intl||!Intl.Segmenter)return root;var seg=new Intl.Segmenter('th',{granularity:'word'});var tw=document.createTreeWalker(root,NodeFilter.SHOW_TEXT),n,list=[];while(n=tw.nextNode())if(/[\u0E00-\u0E7F]{6,}/.test(n.nodeValue))list.push(n);list.forEach(function(t){var out=[];for(var it=seg.segment(t.nodeValue)[Symbol.iterator](),r;!(r=it.next()).done;)out.push(r.value.segment);t.nodeValue=out.join('\u200B');});return root}
+  function savePdf(el, filename, opt) {
+    opt = opt || {};
+    toast('กำลังสร้างไฟล์ PDF…');
+    var root = document.documentElement;
+    root.classList.add('pdfmode');
+    var fonts = document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve();
+    return fonts.then(function () { return loadScript(H2P); }).then(function () {
+      return window.html2pdf().set({
+        margin: opt.margin || [10, 10, 12, 10], filename: (filename || 'เอกสาร').replace(/[\\/:*?"<>|]+/g, ' ') + '.pdf',
+        image: { type: 'jpeg', quality: 0.95 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', scrollX: 0, scrollY: 0 },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: opt.landscape ? 'landscape' : 'portrait' },
+        pagebreak: { mode: ['css', 'legacy'], avoid: opt.avoid || ['tr', '.res-ev', 'h3'] }
+      }).from(zws(el.cloneNode(true))).save();
+    }).then(function () { toast('บันทึกไฟล์ PDF แล้ว'); }, function (e) {
+      toast('สร้าง PDF ไม่สำเร็จ — ใช้ปุ่มพิมพ์ แล้วเลือก "บันทึกเป็น PDF" แทน'); if (window.console) console.error(e);
+    }).then(function () { root.classList.remove('pdfmode'); });
+  }
   function levelLabel(name) { return LEVEL_LABEL[name] || name || 'ทั่วไป'; }
   function levelsOf(events) {
     var seen = [];
@@ -75,5 +106,5 @@
   }
 
   window.C = { http: http, esc: esc, norm: norm, toMs: toMs, thDate: thDate, thDateTime: thDateTime, left: left,
-    toast: toast, pageNav: pageNav, levelLabel: levelLabel, levelsOf: levelsOf, store: store, logoHtml: logoHtml, days: days };
+    toast: toast, savePdf: savePdf, pageNav: pageNav, levelLabel: levelLabel, levelsOf: levelsOf, store: store, logoHtml: logoHtml, days: days };
 })();

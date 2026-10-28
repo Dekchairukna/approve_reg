@@ -296,3 +296,14 @@ table.roster{table-layout:fixed;width:100%}
 table.roster th:nth-child(2){width:36%}
 @media (min-width:700px){table.roster td.nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
 @media (max-width:640px){table.roster th:nth-child(1){width:30px}table.roster th:nth-child(3){width:64px}table.roster th:nth-child(2){width:32%}table.roster td,table.roster th{padding:6px 4px;font-size:13px}}
+/* โหมดสร้าง PDF (ใช้ร่วมกับ C.savePdf) */
+.pdfmode .noprint{display:none!important}
+.pdfmode .printonly{display:block!important}
+.pdfmode .card{border:0!important;box-shadow:none!important;padding:0!important;background:#fff!important}
+.pdfmode .tbl-wrap{overflow:visible!important}
+.pdfmode .res-evs{display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:start}
+.pdfmode table.roster td.nm{white-space:normal}
+html.pdfmode:root:not([data-theme="light"]), html.pdfmode:root {
+  --bg: #ffffff; --surface: #ffffff; --surface-2: #f8f5fc; --ink: #1f1530; --muted: #5a5068; --line: #cfc6dc;
+  --accent: #5b2aa0; --accent-soft: #ede4f8; --on-accent: #ffffff;
+}

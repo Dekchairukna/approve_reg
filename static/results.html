@@ -53,13 +53,17 @@
     var d = R.d, p = d.progress;
     app.innerHTML = '<section class="card" style="display:grid;gap:12px">' +
       '<div class="row between noprint"><span class="small muted">บันทึกผลแล้ว ' + p.withResult + ' / ' + p.events + ' รายการ · ข้อมูล ณ ' +
-      new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.</span><div class="row"><button class="btn" id="pr">พิมพ์</button><button class="btn" id="rf">รีเฟรช</button></div></div>' +
+      new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.</span><div class="row"><button class="btn" id="pdf">บันทึก PDF</button><button class="btn" id="pr">พิมพ์</button><button class="btn" id="rf">รีเฟรช</button></div></div>' +
       '<div class="subtabs noprint" role="tablist">' + TABS.map(function (t) { return '<button role="tab" data-t="' + t[0] + '" aria-selected="' + (t[0] === R.tab) + '">' + t[1] + '</button>'; }).join('') + '</div>' +
       '<div id="filters" class="noprint" style="display:grid;gap:8px"></div>' +
       '<div id="ptitle" class="printonly"></div>' +
       '<div id="body"></div></section>';
     document.getElementById('rf').onclick = load;
     document.getElementById('pr').onclick = function () { window.print(); };
+    document.getElementById('pdf').onclick = function () {
+      var t = TABS.filter(function (x) { return x[0] === R.tab; })[0][1];
+      C.savePdf(app.querySelector('section.card'), 'ผลการแข่งขัน ' + (R.d.comp.sport || '') + ' ' + t + (R.level ? ' ' + C.levelLabel(R.level) : ''));
+    };
     app.querySelectorAll('.subtabs button').forEach(function (b) {
       b.onclick = function () { R.tab = b.getAttribute('data-t'); C.store('res_tab', R.tab); draw(); };
     });

@@ -63,7 +63,7 @@
           }).join('') + '</div></div>';
       }).join('') +
       '<div class="row"><input type="search" id="q" placeholder="ค้นหาชื่อนักกีฬาหรือโรงเรียน" value="' + esc(R.q) + '" style="flex:1;min-width:180px">' +
-      '<button class="btn" id="pr">พิมพ์</button></div></div>' +
+      '<button class="btn" id="pdf">บันทึก PDF</button><button class="btn" id="pr">พิมพ์</button></div></div>' +
       '<div id="list"></div></section>';
     app.querySelectorAll('.evchips button').forEach(function (b) {
       b.onclick = function () {
@@ -81,6 +81,10 @@
     });
     document.getElementById('q').oninput = function () { R.q = this.value; drawList(); };
     document.getElementById('pr').onclick = function () { window.print(); };
+    document.getElementById('pdf').onclick = function () {
+      if (!R.sel.length) { C.toast('เลือกรายการก่อน'); return; }
+      C.savePdf(document.getElementById('list'), 'รายชื่อนักกีฬาที่ยืนยันลงแข่ง ' + (R.d.comp.sport || ''), { avoid: ['tr', 'h3'] });
+    };
     drawList();
   }
 

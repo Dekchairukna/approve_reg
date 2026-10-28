@@ -371,19 +371,37 @@
     '@media print{body{background:#fff}.bar{display:none}.sheets{display:block;padding:0}.sheet{box-shadow:none;width:auto;padding:0;page-break-after:always;break-after:page}' +
     '.sheet:last-child{page-break-after:auto;break-after:auto}.blk.pb{break-before:page;page-break-before:always;border-top:0;margin-top:0;padding-top:0}' +
     'th{-webkit-print-color-adjust:exact;print-color-adjust:exact}}';
+  /* ปุ่มบันทึก PDF ในหน้าต่างพิมพ์: โหลด html2pdf จาก CDN แล้วบันทึกทุกแผ่นเป็นไฟล์เดียว */
+  var PDF_CSS = '.pdfmode .sheets{display:block;padding:0}.pdfmode .sheet{box-shadow:none;width:auto;max-width:none;padding:0}' +
+    '.pdfmode .blk.pb{border-top:0;margin-top:0;padding-top:0}';
+  /* หน้าต่างพิมพ์: เปิดเป็นหน้า blob (มีสคริปต์ของตัวเอง) ปุ่มพิมพ์ + บันทึกเป็นไฟล์ PDF ด้วย html2pdf */
+  var PRINT_JS = 'function zws(root){if(!window.Intl||!Intl.Segmenter)return root;var seg=new Intl.Segmenter(\'th\',{granularity:\'word\'});var tw=document.createTreeWalker(root,NodeFilter.SHOW_TEXT),n,list=[];while(n=tw.nextNode())if(/[\\u0E00-\\u0E7F]{6,}/.test(n.nodeValue))list.push(n);list.forEach(function(t){var out=[];for(var it=seg.segment(t.nodeValue)[Symbol.iterator](),r;!(r=it.next()).done;)out.push(r.value.segment);t.nodeValue=out.join(\'\\u200B\');});return root};var NAME=__NAME__;function msg(t){document.getElementById("pmsg").textContent=t}' +
+    'function load(u){return new Promise(function(a,b){var s=document.createElement("script");s.src=u;s.onload=a;s.onerror=b;document.head.appendChild(s)})}' +
+    'function savePdf(){var btn=document.getElementById("pdfBtn");btn.disabled=true;msg("กำลังสร้างไฟล์ PDF… (ถ้ารายชื่อเยอะอาจใช้เวลาสักครู่)");' +
+    'var p=window.html2pdf?Promise.resolve():load("https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js").catch(function(){return load("https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js")});' +
+    'document.body.classList.add("pdfmode");' +
+    'p.then(function(){return document.fonts?document.fonts.ready:0}).then(function(){return html2pdf().set({margin:[12,12,12,12],filename:NAME+".pdf",image:{type:"jpeg",quality:0.95},' +
+    'html2canvas:{scale:2,useCORS:true,backgroundColor:"#ffffff",scrollX:0,scrollY:0},jsPDF:{unit:"mm",format:"a4",orientation:"portrait"},' +
+    'pagebreak:{mode:["css","legacy"],before:[".sheet + .sheet",".blk.pb"],avoid:["tr",".hd",".meta",".signs",".foot"]}}).from(zws(document.querySelector(".sheets").cloneNode(true))).save()})' +
+    '.then(function(){msg("บันทึกไฟล์ PDF แล้ว")},function(e){msg("สร้าง PDF ไม่สำเร็จ — กดพิมพ์ แล้วเลือก บันทึกเป็น PDF แทน");console.error(e)})' +
+    '.then(function(){document.body.classList.remove("pdfmode");btn.disabled=false})}' +
+    'document.getElementById("pdfBtn").onclick=savePdf;document.getElementById("prBtn").onclick=function(){window.print()};' +
+    'window.addEventListener("load",function(){setTimeout(function(){window.print()},700)})';
   function openPrintWindow(html, title) {
     html = typeof html === 'string' ? html : A.printHtml;
     if (!html) { C.toast('กด "สร้างใบรายงานตัว" ก่อน'); return; }
-    var w = null;
-    try { w = window.open('', '_blank'); } catch (e) { w = null; }
-    if (!w) { try { window.print(); } catch (e) { C.toast('กด ⌘P / Ctrl+P เพื่อพิมพ์'); } return; }
-    w.document.open();
-    w.document.write('<!doctype html><html lang="th"><head><meta charset="utf-8"><title>' + esc(title || 'ใบรายงานตัวนักกีฬา') + '</title>' +
+    var nm = (title || 'ใบรายงานตัวนักกีฬา').replace(/[\\/:*?"<>|]+/g, ' ');
+    var doc = '<!doctype html><html lang="th"><head><meta charset="utf-8"><base href="' + location.origin + '/"><title>' + esc(nm) + '</title>' +
       '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap">' +
-      '<style>' + PRINT_CSS + '</style></head><body><div class="bar"><button onclick="window.print()">พิมพ์ / บันทึกเป็น PDF</button>' +
-      '<span>ตั้งค่ากระดาษ A4 · ถ้าไม่ขึ้นหน้าต่างพิมพ์ กด ⌘P หรือ Ctrl+P</span></div><div class="sheets">' + html + '</div>' +
-      '<script>window.addEventListener("load",function(){setTimeout(function(){window.print()},600)})<\/script></body></html>');
-    w.document.close();
+      '<style>' + PRINT_CSS + PDF_CSS + '</style></head><body><div class="bar"><button id="prBtn">พิมพ์</button>' +
+      '<button id="pdfBtn">บันทึกเป็นไฟล์ PDF</button>' +
+      '<span id="pmsg">ตั้งค่ากระดาษ A4 · ถ้าไม่ขึ้นหน้าต่างพิมพ์ กด ⌘P หรือ Ctrl+P</span></div><div class="sheets">' + html + '</div>' +
+      '<script>' + PRINT_JS.replace('__NAME__', JSON.stringify(nm).replace(/</g, '\\u003c')) + '<\/script></body></html>';
+    var url = URL.createObjectURL(new Blob([doc], { type: 'text/html;charset=utf-8' }));
+    var w = null;
+    try { w = window.open(url, '_blank'); } catch (e) { w = null; }
+    if (!w) { location.href = url; return; }
+    setTimeout(function () { URL.revokeObjectURL(url); }, 120000);
   }
 
   /* ---------- วันแข่ง / เวลาปิด ---------- */
