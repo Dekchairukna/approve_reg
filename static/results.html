@@ -48,7 +48,7 @@
     }).catch(function (e) { app.innerHTML = '<div class="errors">' + esc((e && e.message) || e) + '</div>'; });
   }
 
-  var TABS = [['school', 'ตามสถาบัน'], ['person', 'รายบุคคล'], ['event', 'รายรายการ']];
+  var TABS = [['school', 'ตามสถาบัน'], ['person', 'รายบุคคล'], ['event', 'รายรายการ'], ['mvp', 'MVP']];
   function draw() {
     var d = R.d, p = d.progress;
     app.innerHTML = '<section class="card" style="display:grid;gap:12px">' +
@@ -71,7 +71,7 @@
     redraw();
   }
   function redraw() {
-    ({ school: drawSchool, person: drawPerson, event: drawEvent }[R.tab] || drawSchool)();
+    ({ school: drawSchool, person: drawPerson, event: drawEvent, mvp: drawMvp }[R.tab] || drawSchool)();
     var lv = R.level ? 'ระดับ' + R.level : 'ทุกระดับ', evs = selEvents();
     document.getElementById('ptitle').innerHTML = '<h2 style="margin:0">ผลการแข่งขัน' + esc(R.d.comp.sport ? ' ' + R.d.comp.sport : '') + ' · ' +
       esc(TABS.filter(function (t) { return t[0] === R.tab; })[0][1]) + '</h2><div class="small">' + esc(R.d.comp.name) + '</div>' +
@@ -157,6 +157,44 @@
         : (list.length ? '<p class="muted">ไม่พบรายชื่อที่ค้นหา</p>' : empty)) + '</div>';
     var inp = document.getElementById('q');
     inp.oninput = function () { R.q = this.value; var pos = this.selectionStart; drawPerson(); var n = document.getElementById('q'); n.focus(); n.setSelectionRange(pos, pos); };
+  }
+
+  /* MVP: แยกระดับชั้น × ชาย/หญิง นับเหรียญทอง → เงิน → ทองแดง ถ้าเท่ากันทุกประเภทได้รับร่วม
+     เพศดูจากคำนำหน้าชื่อ (คู่ผสมนับให้แต่ละคนตามเพศของตัวเอง) */
+  function genderOf(name) {
+    if (/^(ด\.ช\.|เด็กชาย|นาย)/.test(name)) return 'ชาย';
+    if (/^(ด\.ญ\.|เด็กหญิง|น\.ส\.|นางสาว|นาง)/.test(name)) return 'หญิง';
+    return '';
+  }
+  function drawMvp() {
+    var want = {}, lvOrder = [];
+    selEvents().forEach(function (e) { want[e.event] = 1; });
+    R.d.events.forEach(function (e) { if (e.level && lvOrder.indexOf(e.level) < 0) lvOrder.push(e.level); });
+    var groups = {}, ord = { gold: 0, silver: 1, bronze: 2 };
+    R.d.people.forEach(function (p) {
+      if (!want[p.event]) return;
+      var g = genderOf(p.name), key = p.level + '|' + g, k2 = p.school + '|' + p.name.replace(/\s+/g, '');
+      var grp = groups[key] = groups[key] || {};
+      var x = grp[k2] = grp[k2] || { name: p.name, school: p.school, gold: 0, silver: 0, bronze: 0, items: [] };
+      x[p.medal]++; x.items.push(p);
+    });
+    var cards = [];
+    lvOrder.filter(function (l) { return !R.level || l === R.level; }).forEach(function (lv) {
+      ['ชาย', 'หญิง'].forEach(function (g) {
+        var list = Object.values(groups[lv + '|' + g] || {});
+        list.sort(function (a, b) { return b.gold - a.gold || b.silver - a.silver || b.bronze - a.bronze; });
+        var top = list.length ? list.filter(function (x) { return x.gold === list[0].gold && x.silver === list[0].silver && x.bronze === list[0].bronze; }) : [];
+        cards.push('<div class="mvp-card"><div class="mvp-h"><b>' + esc(C.levelLabel(lv)) + ' · ' + g + '</b>' + (top.length > 1 ? ' <span class="small muted">รับร่วม ' + top.length + ' คน</span>' : '') + '</div>' +
+          (top.length ? top.map(function (x) {
+            x.items.sort(function (a, b) { return ord[a.medal] - ord[b.medal]; });
+            return '<div class="mvp-p"><div class="mvp-name">🏆 ' + esc(x.name) + '</div><div class="small muted">' + esc(shortSchool(x.school)) + '</div>' +
+              '<div class="mvp-count">' + (x.gold ? medal('gold') + ' ' + x.gold + ' ' : '') + (x.silver ? medal('silver') + ' ' + x.silver + ' ' : '') + (x.bronze ? medal('bronze') + ' ' + x.bronze : '') + '</div>' +
+              '<div class="small pm-items">' + x.items.map(function (p) { return '<span><i class="dot ' + p.medal + '"></i>' + esc(p.short) + '</span>'; }).join('') + '</div></div>';
+          }).join('') : '<p class="muted small" style="margin:6px 0 0">ยังไม่มีผู้ได้รับเหรียญ</p>') + '</div>');
+      });
+    });
+    body().innerHTML = cards.length ? '<div class="mvp-grid">' + cards.join('') + '</div>' +
+      '<p class="hint" style="margin:10px 0 0">MVP แยกตามระดับชั้นและเพศ นับเหรียญทองก่อน ถ้าเท่ากันดูเหรียญเงิน แล้วเหรียญทองแดง หากเท่ากันทุกประเภทได้รับร่วม · นับเหรียญของทุกรายการรวมประเภททีม (ตัวสำรองนับด้วย) · คู่ผสมนับให้แต่ละคนตามเพศ</p>' : empty;
   }
 
   function drawEvent() {

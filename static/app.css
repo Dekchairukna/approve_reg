@@ -307,3 +307,12 @@ html.pdfmode:root:not([data-theme="light"]), html.pdfmode:root {
   --bg: #ffffff; --surface: #ffffff; --surface-2: #f8f5fc; --ink: #1f1530; --muted: #5a5068; --line: #cfc6dc;
   --accent: #5b2aa0; --accent-soft: #ede4f8; --on-accent: #ffffff;
 }
+/* MVP */
+.mvp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}
+.mvp-card{border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:grid;gap:8px;align-content:start;break-inside:avoid}
+.mvp-h{font-size:15px}
+.mvp-p{display:grid;gap:3px;padding-top:6px;border-top:1px dashed var(--line)}
+.mvp-name{font-weight:700;font-size:16px}
+.mvp-count{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+@media print{.mvp-grid{grid-template-columns:1fr 1fr}}
+.pdfmode .mvp-grid{grid-template-columns:1fr 1fr}
