@@ -316,3 +316,25 @@ html.pdfmode:root:not([data-theme="light"]), html.pdfmode:root {
 .mvp-count{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
 @media print{.mvp-grid{grid-template-columns:1fr 1fr}}
 .pdfmode .mvp-grid{grid-template-columns:1fr 1fr}
+table.top4 td:nth-child(2){white-space:nowrap}
+@media (max-width:640px){table.top4 th:nth-child(4),table.top4 td:nth-child(4){display:none}table.top4 td:nth-child(2){white-space:normal}}
+
+/* รายงานรายชื่อผู้เข้ารอบสำหรับกระดาษและ PDF */
+table.top4{width:100%;border-collapse:collapse}
+table.top4 th,table.top4 td{border:1px solid var(--line);vertical-align:top}
+table.top4 .pm-items span{white-space:normal;display:block}
+.top4-heading{break-after:avoid}
+@media print{
+ table.top4{font-family:var(--f-print);font-size:12px;table-layout:fixed}
+ table.top4 th,table.top4 td{padding:5px;overflow-wrap:anywhere}
+ table.top4 th:nth-child(1){width:7%}
+ table.top4 th:nth-child(2){width:24%}
+ table.top4 th:nth-child(3){width:23%}
+ table.top4 th:nth-child(4){width:12%}
+ table.top4 th:nth-child(4),table.top4 td:nth-child(4){display:table-cell}
+ table.top4 td:nth-child(2){white-space:normal}
+ table.top4 tr{break-inside:avoid}
+ table.top4 thead{display:table-header-group}
+}
+.pdfmode table.top4 td:nth-child(2){white-space:normal}
+.pdfmode table.top4 th:nth-child(4),.pdfmode table.top4 td:nth-child(4){display:table-cell}

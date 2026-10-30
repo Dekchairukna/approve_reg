@@ -33,6 +33,7 @@
   var MED = { gold: 'ทอง', silver: 'เงิน', bronze: 'ทองแดง' };
   var R = { d: null, tab: 'school', level: '', q: '', evSel: [] };
   try { R.tab = C.store('res_tab') || 'school'; } catch (e) {}
+  if (['school', 'person', 'event', 'mvp', 'top4'].indexOf(R.tab) < 0) R.tab = 'school';
 
   function medal(m) { return '<span class="medal ' + m + '">' + MED[m] + '</span>'; }
   function shortSchool(s) { return (s || '').replace(/^โรงเรียน/, ''); }
@@ -41,6 +42,7 @@
   function load() {
     C.http('GET', '/api/c/' + encodeURIComponent(slug) + '/results').then(function (d) {
       R.d = d;
+      R.loadedAt = new Date();
       var c = d.comp;
       document.title = 'ผลการแข่งขัน · ' + c.name;
       document.getElementById('brand').innerHTML = C.logoHtml(c, 'logo') + '<div><div class="games">' + esc(c.name) + '</div><h1>รายงานผลการแข่งขัน' + esc(c.sport ? ' ' + c.sport : '') + '</h1></div>';
@@ -48,7 +50,7 @@
     }).catch(function (e) { app.innerHTML = '<div class="errors">' + esc((e && e.message) || e) + '</div>'; });
   }
 
-  var TABS = [['school', 'ตามสถาบัน'], ['person', 'รายบุคคล'], ['event', 'รายรายการ'], ['mvp', 'MVP']];
+  var TABS = [['school', 'ตามสถาบัน'], ['person', 'รายบุคคล'], ['event', 'รายรายการ'], ['mvp', 'MVP'], ['top4', 'รายชื่อเข้ารอบ 4 ทีม']];
   function draw() {
     var d = R.d, p = d.progress;
     app.innerHTML = '<section class="card" style="display:grid;gap:12px">' +
@@ -71,11 +73,11 @@
     redraw();
   }
   function redraw() {
-    ({ school: drawSchool, person: drawPerson, event: drawEvent, mvp: drawMvp }[R.tab] || drawSchool)();
+    ({ school: drawSchool, person: drawPerson, event: drawEvent, mvp: drawMvp, top4: drawTop4 }[R.tab] || drawSchool)();
     var lv = R.level ? 'ระดับ' + R.level : 'ทุกระดับ', evs = selEvents();
     document.getElementById('ptitle').innerHTML = '<h2 style="margin:0">ผลการแข่งขัน' + esc(R.d.comp.sport ? ' ' + R.d.comp.sport : '') + ' · ' +
       esc(TABS.filter(function (t) { return t[0] === R.tab; })[0][1]) + '</h2><div class="small">' + esc(R.d.comp.name) + '</div>' +
-      '<div class="small">' + esc(lv + ' · ' + (R.evSel.length ? evs.map(function (e) { return (R.level ? '' : C.levelLabel(e.level) + ' ') + e.short; }).join(', ') : 'ทุกรายการ')) + '</div>';
+      '<div class="small">' + esc(lv + ' · ' + (R.evSel.length ? evs.map(function (e) { return (R.level ? '' : C.levelLabel(e.level) + ' ') + e.short; }).join(', ') : 'ทุกรายการ')) + '</div>' + '<div class="small">ข้อมูล ณ ' + esc(R.loadedAt.toLocaleString('th-TH')) + '</div>';
   }
 
   /* ตัวกรองร่วมทุกแท็บ: ระดับ + เลือกรายการ (เลือกได้หลายรายการ) */
@@ -195,6 +197,36 @@
     });
     body().innerHTML = cards.length ? '<div class="mvp-grid">' + cards.join('') + '</div>' +
       '<p class="hint" style="margin:10px 0 0">MVP แยกตามระดับชั้นและเพศ นับเหรียญทองก่อน ถ้าเท่ากันดูเหรียญเงิน แล้วเหรียญทองแดง หากเท่ากันทุกประเภทได้รับร่วม · นับเหรียญของทุกรายการรวมประเภททีม (ตัวสำรองนับด้วย) · คู่ผสมนับให้แต่ละคนตามเพศ</p>' : empty;
+  }
+
+  /* รายชื่อนักกีฬาที่เข้ารอบ 4 ทีมสุดท้าย (ได้เหรียญ) ทุกรายการ ตัดชื่อซ้ำ แยกชาย/หญิง */
+  function drawTop4() {
+    var want = {}, ord = { gold: 0, silver: 1, bronze: 2 };
+    selEvents().forEach(function (e) { want[e.event] = 1; });
+    var map = {}, list = [];
+    R.d.people.forEach(function (p) {
+      if (!want[p.event]) return;
+      var k = p.school + '|' + p.name.replace(/\s+/g, '');
+      if (!map[k]) { map[k] = { name: p.name, school: p.school, level: p.level, g: genderOf(p.name), items: [] }; list.push(map[k]); }
+      map[k].items.push(p);
+    });
+    var lvIdx = {}; R.d.events.forEach(function (e, i) { if (!(e.level in lvIdx)) lvIdx[e.level] = i; });
+    list.sort(function (a, b) { return (lvIdx[a.level] - lvIdx[b.level]) || a.school.localeCompare(b.school, 'th') || a.name.localeCompare(b.name, 'th'); });
+    var groups = [['ชาย', 'นักกีฬาชาย'], ['หญิง', 'นักกีฬาหญิง'], ['', 'ไม่ทราบเพศ (คำนำหน้าชื่อไม่ชัด)']];
+    var html = groups.map(function (g) {
+      var rows = list.filter(function (x) { return x.g === g[0]; });
+      if (!rows.length) return '';
+      return '<h3 class="top4-heading" style="margin:14px 0 6px">' + g[1] + ' <span class="small muted">' + rows.length + ' คน</span></h3>' +
+        '<div class="tbl-wrap"><table class="t top4"><thead><tr><th>ที่</th><th style="text-align:left">ชื่อ-นามสกุล</th><th style="text-align:left">โรงเรียน</th><th>ระดับ</th><th style="text-align:left">รายการที่เข้ารอบ</th></tr></thead><tbody>' +
+        rows.map(function (x, i) {
+          x.items.sort(function (a, b) { return ord[a.medal] - ord[b.medal]; });
+          return '<tr><td class="num">' + (i + 1) + '</td><td>' + esc(x.name) + '</td><td>' + esc(shortSchool(x.school)) + '</td><td class="num">' + esc(C.levelLabel(x.level)) + '</td>' +
+            '<td class="small"><span class="pm-items">' + x.items.map(function (p) { return '<span><i class="dot ' + p.medal + '"></i>' + esc(C.levelLabel(p.level) + ' ' + p.short + ' (' + MED[p.medal] + ')') + '</span>'; }).join('') + '</span></td></tr>';
+        }).join('') + '</tbody></table></div>';
+    }).join('');
+    var nm = list.filter(function (x) { return x.g === 'ชาย'; }).length, nf = list.filter(function (x) { return x.g === 'หญิง'; }).length;
+    body().innerHTML = list.length ? '<div class="row" style="gap:16px"><b>นักกีฬาไม่ซ้ำ รวม ' + list.length + ' คน</b><span>ชาย ' + nm + ' คน</span><span>หญิง ' + nf + ' คน</span>' + (list.length - nm - nf ? '<span>ไม่ทราบเพศ ' + (list.length - nm - nf) + ' คน</span>' : '') + '</div>' + '<p class="small muted">บันทึกผลแล้ว ' + R.d.progress.withResult + ' / ' + R.d.progress.events + ' รายการ · รายชื่ออาจยังไม่ครบหากยังบันทึกผลไม่เสร็จ</p>' + html +
+      '<p class="hint" style="margin:10px 0 0">เข้ารอบ 4 ทีม = ทีม/คนที่ได้ ทอง เงิน ทองแดง (2 ทีม) ของแต่ละรายการ · คนที่เข้ารอบหลายรายการแสดงครั้งเดียว · ทีม/คู่นับทุกคนรวมตัวสำรอง · ตามรายการที่บันทึกผลแล้ว</p>' : empty;
   }
 
   function drawEvent() {
